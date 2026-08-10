@@ -17,3 +17,4 @@ test/.travis.yml0
 
 #ignore .commitinfo created by ioBroker release script
 .commitinfo
+main.js.tmp
