@@ -157,6 +157,15 @@ function startAdapter(options) {
             if (adapter.config.host) {
                 adapter.log.info('[START] Starting solarlog adapter');
                 await adapter.setStateAsync('info.connection', true, true);
+                // File storage root for Backup.*/Export.* - required before the first
+                // writeFileAsync/readDirAsync call, js-controller does not create it implicitly.
+                // Uses setForeignObjectNotExistsAsync because the target id IS the bare
+                // namespace itself, not a state relative to it.
+                await adapter.setForeignObjectNotExistsAsync(adapter.namespace, {
+                    type: 'meta',
+                    common: { name: adapter.namespace, type: 'meta.folder' },
+                    native: {},
+                });
                 await main();
             } else {
                 adapter.log.warn('[START] No IP-address set');
