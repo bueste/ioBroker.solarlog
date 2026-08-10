@@ -93,7 +93,6 @@ let fastPolling;
 
 let jedeStunde;
 let jedenTag;
-let jedeNacht;
 let restartTimer;
 
 let userName;
@@ -118,9 +117,6 @@ function unload(callback) {
 
         jedenTag && jedenTag.cancel();
         jedenTag = null;
-
-        jedeNacht && jedeNacht.cancel();
-        jedeNacht = null;
 
         polling && clearInterval(polling);
         polling = null;
@@ -318,18 +314,10 @@ async function main() {
             }
         });
 
-        if (uzimp) {
-            jedeNacht = schedule.scheduleJob('58 23 * * *', async () => accumulateMonthlyPerDevice());
-        }
-
         if (backupAuto) {
             weeklyBackup = schedule.scheduleJob('0 3 * * 0', async () => {
-                if (await hasPlantDataChangedSinceLastBackup()) {
-                    adapter.log.info('Starting scheduled weekly backup (plant data changed)');
-                    await runBackup();
-                } else {
-                    adapter.log.info('Skipping scheduled backup - no change since last backup');
-                }
+                adapter.log.info('Starting scheduled weekly backup');
+                await runBackup();
             });
         }
 
@@ -351,26 +339,6 @@ async function main() {
         adapter.log.warn(`main - Error: ${e.message}`);
     }
 } // endMain
-
-async function getPlantSignature() {
-    const yieldTotal = await adapter.getStateAsync('status.yieldtotal');
-    const consTotal = await adapter.getStateAsync('status.consyieldtotal');
-    return `${yieldTotal ? yieldTotal.val : ''}|${consTotal ? consTotal.val : ''}`;
-} // END getPlantSignature
-
-async function hasPlantDataChangedSinceLastBackup() {
-    try {
-        const lastSigState = await adapter.getStateAsync('Backup.lastSignature');
-        if (!lastSigState || !lastSigState.val) {
-            return true; // no previous backup recorded
-        }
-        const currentSignature = await getPlantSignature();
-        return currentSignature !== lastSigState.val;
-    } catch (e) {
-        adapter.log.debug(`hasPlantDataChangedSinceLastBackup - Error, backing up to be safe: ${e.message}`);
-        return true;
-    }
-} // END hasPlantDataChangedSinceLastBackup
 
 async function runBackup() {
     if (backupRunning) {
@@ -461,7 +429,6 @@ async function runBackup() {
         await adapter.setStateAsync('Backup.status', 'done', true);
         await adapter.setStateAsync('Backup.lastSuccess', new Date().toISOString(), true);
         await adapter.setStateAsync('Backup.lastFile', fileName, true);
-        await adapter.setStateAsync('Backup.lastSignature', await getPlantSignature(), true);
         adapter.log.info(`Backup saved as ${fileName} (${fileResponse.data.byteLength} bytes)`);
 
         await pruneOldBackups();
@@ -489,96 +456,23 @@ async function pruneOldBackups() {
     }
 } // END pruneOldBackups
 
-async function accumulateMonthlyPerDevice() {
-    // Solar-Log only reports per-device totals per YEAR (code 854), not per month.
-    // We accumulate a per-device monthly running total ourselves from the daily
-    // 'daysum' values: on the 1st of the month the accumulator is reset to that
-    // day's sum (after archiving the finished month), on every other day the
-    // day's sum is added to it.
-    try {
-        const now = new Date();
-        const isFirstOfMonth = now.getDate() === 1;
-
-        for (const name of names) {
-            const id = `INV.${name}.yieldmonth`;
-            const dayState = await adapter.getStateAsync(`INV.${name}.daysum`);
-            if (!dayState || dayState.val === null || dayState.val === undefined) {
-                continue;
-            }
-            const daysum = Number(dayState.val) || 0;
-
-            if (isFirstOfMonth) {
-                const monthState = await adapter.getStateAsync(id);
-                if (monthState && monthState.val !== null && monthState.val !== undefined) {
-                    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    const archiveYear = prevMonth.getFullYear();
-                    const archiveMonth = String(prevMonth.getMonth() + 1).padStart(2, '0');
-                    const archiveId = `Historic.${archiveYear}.monthlyINV.${archiveMonth}.${name}`;
-                    await adapter.setObjectNotExistsAsync(archiveId, {
-                        type: 'state',
-                        common: {
-                            name: 'monthsum',
-                            desc: 'Month sum Wh per device/apartment meter',
-                            type: 'number',
-                            role: 'value.monthsum',
-                            read: true,
-                            write: false,
-                            unit: 'Wh',
-                        },
-                        native: {},
-                    });
-                    await adapter.setStateAsync(archiveId, monthState.val, true);
-                }
-                await adapter.setStateAsync(id, daysum, true);
-            } else {
-                const monthState = await adapter.getStateAsync(id);
-                const previous = monthState && monthState.val ? Number(monthState.val) : 0;
-                await adapter.setStateAsync(id, previous + daysum, true);
-            }
-        }
-        adapter.log.debug('Accumulated per-device monthly totals');
-    } catch (e) {
-        adapter.log.warn(`accumulateMonthlyPerDevice - Error: ${e.message}`);
-    }
-} // END accumulateMonthlyPerDevice
-
 async function exportMeterReadings() {
-    // Billing export for the property management company (Treuhänder): one row per
-    // apartment/meter and month, in kWh, built from the per-device monthly archive
-    // (Historic.<year>.monthlyINV.<month>.<name>) plus the current running month.
     try {
-        const rows = [['Jahr', 'Monat', 'Zaehler', 'Verbrauch_kWh']];
-
-        const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*');
-        for (const id of Object.keys(archived).sort()) {
-            const state = archived[id];
-            if (!state || state.val === null || state.val === undefined) {
-                continue;
-            }
-            const match = id.match(/Historic\.(\d{4})\.monthlyINV\.(\d{2})\.(.+)$/);
-            if (!match) {
-                continue;
-            }
-            const [, year, month, name] = match;
-            rows.push([year, month, name, (Number(state.val) / 1000).toFixed(2)]);
-        }
-
-        const now = new Date();
-        const currentYear = String(now.getFullYear());
-        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-        for (const name of names) {
-            const monthState = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
-            if (monthState && monthState.val !== null && monthState.val !== undefined) {
-                rows.push([currentYear, currentMonth, name, (Number(monthState.val) / 1000).toFixed(2)]);
+        const states = await adapter.getStatesAsync('Historic.*');
+        const rows = [['id', 'value']];
+        for (const id of Object.keys(states).sort()) {
+            const state = states[id];
+            if (state && state.val !== null && state.val !== undefined) {
+                rows.push([id.replace(`${adapter.namespace}.`, ''), state.val]);
             }
         }
-
         const csv = rows.map(row => row.join(';')).join('\n');
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const fileName = `export/zaehlerstaende_${timestamp}.csv`;
         await adapter.writeFileAsync(adapter.namespace, fileName, csv);
         await adapter.setStateAsync('Export.lastFile', fileName, true);
-        adapter.log.info(`Meter readings exported as ${fileName} (${rows.length - 1} rows)`);
+        adapter.log.info(`Meter readings exported as ${fileName}`);
     } catch (e) {
         adapter.log.warn(`exportMeterReadings - Error: ${e.message}`);
     }
@@ -1907,20 +1801,6 @@ async function setInvObjects() {
                         desc: 'Daily sum Wh',
                         type: 'number',
                         role: 'value.daysum',
-                        read: true,
-                        write: false,
-                        unit: 'Wh',
-                    },
-                    native: {},
-                });
-
-                await adapter.setObjectNotExistsAsync(`INV.${names[i]}.yieldmonth`, {
-                    type: 'state',
-                    common: {
-                        name: 'MonthSum',
-                        desc: 'Monthly sum Wh (running total for the current month, adapter-side accumulation)',
-                        type: 'number',
-                        role: 'value.monthsum',
                         read: true,
                         write: false,
                         unit: 'Wh',

@@ -719,6 +719,20 @@
       "native": {}
     },
     {
+      "_id": "Backup.lastSignature",
+      "type": "state",
+      "common": {
+        "name": "Last backup signature",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "expert": true,
+        "desc": "Internal: total yield/consumption counters at the time of the last backup, used to skip automatic backups when nothing changed"
+      },
+      "native": {}
+    },
+    {
       "_id": "Backup.lastError",
       "type": "state",
       "common": {
