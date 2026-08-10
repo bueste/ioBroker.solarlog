@@ -590,7 +590,9 @@ async function getTariffForMonth(year, month) {
         return Number(monthTariff.val);
     }
     const defaultTariff = await adapter.getStateAsync('Tarif.default');
-    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined ? Number(defaultTariff.val) : 0;
+    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined
+        ? Number(defaultTariff.val)
+        : 0;
 } // END getTariffForMonth
 
 async function exportMeterReadings() {
