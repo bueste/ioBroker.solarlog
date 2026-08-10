@@ -405,7 +405,10 @@ async function runBackup() {
     try {
         await login();
 
-        const start = await axios.post(`${deviceIpAddress}/getjp`, { 715: null }, backupOptions);
+        // axios silently mis-serializes a plain object body when Content-Type is
+        // urlencoded (the device then sees an empty request) - send raw JSON text
+        // instead, matching what the device's own web UI sends.
+        const start = await axios.post(`${deviceIpAddress}/getjp`, JSON.stringify({ 715: null }), backupOptions);
         const startResult = start?.data?.['715'];
         if (startResult !== 'OK') {
             throw new Error(`Backup could not be started: ${JSON.stringify(startResult)}`);
@@ -421,7 +424,11 @@ async function runBackup() {
 
         while (Date.now() < deadline) {
             await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-            const poll = await axios.post(`${deviceIpAddress}/getjp`, { 801: { 777: null, 778: null } }, backupOptions);
+            const poll = await axios.post(
+                `${deviceIpAddress}/getjp`,
+                JSON.stringify({ 801: { 777: null, 778: null } }),
+                backupOptions,
+            );
             const state801 = poll?.data?.['801'] || {};
             const stateCode = state801['777'];
 
