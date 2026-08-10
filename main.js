@@ -389,21 +389,22 @@ async function runBackup() {
     await adapter.setStateAsync('Backup.progress', 0, true);
     await adapter.setStateAsync('Backup.lastError', '', true);
 
-    // The device requires an active installer session and rejects the backup
-    // endpoints without CSRF header + Referer, unlike the regular polling calls.
-    const backupOptions = {
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            Accept: '*/*',
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-SL-CSRF-PROTECTION': '1',
-            Referer: `${deviceIpAddress}/`,
-            Cookie: `banner_hidden=false; SolarLog=${dataToken}`,
-        },
-    };
-
     try {
         await login();
+
+        // The device requires an active installer session and rejects the backup
+        // endpoints without CSRF header + Referer, unlike the regular polling calls.
+        // Built AFTER login() so it picks up the freshly issued session token.
+        const backupOptions = {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                Accept: '*/*',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-SL-CSRF-PROTECTION': '1',
+                Referer: `${deviceIpAddress}/`,
+                Cookie: `banner_hidden=false; SolarLog=${dataToken}`,
+            },
+        };
 
         // axios silently mis-serializes a plain object body when Content-Type is
         // urlencoded (the device then sees an empty request) - send raw JSON text
