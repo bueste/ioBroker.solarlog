@@ -135,6 +135,14 @@
       {
         "admin": ">=7.7.22"
       }
+    ],
+    "protectedNative": [
+      "userpw",
+      "installerpw"
+    ],
+    "encryptedNative": [
+      "userpw",
+      "installerpw"
     ]
   },
   "native": {
@@ -153,7 +161,9 @@
     "histhour": 0,
     "histmin": 0,
     "userpass": false,
-    "userpw": ""
+    "userpw": "",
+    "installerpass": false,
+    "installerpw": ""
   },
   "objects": [],
   "instanceObjects": [

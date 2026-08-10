@@ -34,6 +34,11 @@
       } else {
         $('#_userpw').hide();
       }
+      if ($('#installerpass').prop('checked')) {
+        $('#_installerpw').show();
+      } else {
+        $('#_installerpw').hide();
+      }
     }
 
     // the function loadSettings has to exist ...
@@ -59,6 +64,9 @@
       });
 
       $('#userpass').on('change', function() {
+        onShow();
+      });
+      $('#installerpass').on('change', function() {
         onShow();
       });
       onShow();
@@ -130,9 +138,20 @@
             <label for="userpass" class="translate">userpass</label>
           </div>
           <div class="input-field col s12 m6 l4" id="_userpw">
-            <input class="value" id="userpw" type="text" />
+            <input class="value" id="userpw" type="password" autocomplete="new-password" />
             <label for="userpw" class="translate">userpw</label>
             <span class="translate">userpw</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <input class="value" id="installerpass" type="checkbox" />
+            <label for="installerpass" class="translate">installerpass</label>
+          </div>
+          <div class="input-field col s12 m6 l4" id="_installerpw">
+            <input class="value" id="installerpw" type="password" autocomplete="new-password" />
+            <label for="installerpw" class="translate">installerpw</label>
+            <span class="translate">installerpw</span>
           </div>
         </div>
       </div>

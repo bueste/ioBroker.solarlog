@@ -77,6 +77,8 @@ let az;
 let kwp;
 
 let userPass = false;
+let installerPass = false;
+let loginLevel = null; // null | 'user' | 'installer'
 // let loginData = '';
 
 const startupData = `{"152":null,"161":null,"162":null,"447":null,"610":null,"611":null,"617":null,"706":null,"739":null,"740":null,"744":null,"800":{"100":null,"160":null},"801":{"101":null,"102":null},"858":null,"895":{"100":null,"101":null,"102":null,"103":null,"104":null,"105":null}}`;
@@ -95,6 +97,7 @@ let restartTimer;
 
 let userName;
 let userPw;
+let installerPw;
 
 function unload(callback) {
     try {
@@ -177,9 +180,23 @@ async function main() {
         forecast = !!adapter.config.forecast;
         historic = !!adapter.config.historic;
         histCRON = `${adapter.config.histmin} ${adapter.config.histhour} * * *`;
-        userName = `user`;
         userPass = !!adapter.config.userpass;
         userPw = adapter.config.userpw;
+        installerPass = !!adapter.config.installerpass;
+        installerPw = adapter.config.installerpw;
+
+        // Installer login is a superset of user login (grants access to additional values),
+        // so it takes precedence when both are configured.
+        if (installerPass) {
+            userName = 'installer';
+            loginLevel = 'installer';
+        } else if (userPass) {
+            userName = 'user';
+            loginLevel = 'user';
+        } else {
+            userName = 'user';
+            loginLevel = null;
+        }
         optionsDefault = {
             method: 'post',
             headers: {
@@ -232,7 +249,7 @@ async function main() {
         adapter.log.debug(`[INFO] Configured polling interval averages&other: ${pollingTimeperiodic}`);
         adapter.log.debug(`[START] Started Adapter with: ${adapter.config.host}`);
 
-        if (userPass) {
+        if (loginLevel) {
             await login();
         }
 
@@ -347,17 +364,23 @@ async function login() {
         adapter.log.debug(`Options: ${JSON.stringify(options)}`);
         adapter.log.debug('starting LOGIN');
 
-        // Solarlog API codes:
+        // Solarlog API codes (each account level has its own hash-required flag + salt):
         // '550' is the main request object for login parameters.
-        // '103' indicates whether password hashing is required (1 = hash required).
-        // '104' contains the salt value for password hashing.
-        const getjpPayload = { 550: { 103: null, 104: null } };
+        // '103'/'104' = hash-required flag / salt for the 'user' account.
+        // '109'/'110' = hash-required flag / salt for the 'installer' account.
+        // Each account uses its OWN salt - reusing the 'user' salt for the 'installer'
+        // login (or vice versa) produces a wrong hash and a "Password was wrong" response.
+        const getjpPayload = { 550: { 103: null, 104: null, 109: null, 110: null } };
         const prot = await axios.post(`${deviceIpAddress}/getjp`, getjpPayload, options);
         const b = prot?.data?.['550'] || {};
-        const pwsHashed = b['103'] === 1 || b['103'] === '1' || b['103'] === true;
 
-        const salt = b['104'];
-        const pwdForPost = pwsHashed && salt ? bcrypt.hashSync(userPw, salt) : userPw;
+        const hashFlagField = loginLevel === 'installer' ? '109' : '103';
+        const saltField = loginLevel === 'installer' ? '110' : '104';
+        const pw = loginLevel === 'installer' ? installerPw : userPw;
+
+        const pwsHashed = b[hashFlagField] === 1 || b[hashFlagField] === '1' || b[hashFlagField] === true;
+        const salt = b[saltField];
+        const pwdForPost = pwsHashed && salt ? bcrypt.hashSync(pw, salt) : pw;
         const loginData = `u=${userName}&p=${pwdForPost}`;
 
         try {
@@ -394,7 +417,7 @@ async function login() {
 
 async function logCheck(dataLC) {
     try {
-        if (!userPass) {
+        if (!loginLevel) {
             await httpsRequest(dataLC);
         } else {
             const options = JSON.parse(JSON.stringify(optionsDefault));

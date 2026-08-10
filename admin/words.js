@@ -343,5 +343,27 @@ systemDictionary = {
     "it": "password utente",
     "es": "contraseña de usuario",
     "pl": "hasło użytkownika"
+  },
+  "installerpass": {
+    "en": "installer login activated (grants access to additional values)",
+    "de": "Installateur-Login aktiviert (schaltet zusätzliche Werte frei)",
+    "ru": "вход установщика активирован (открывает доступ к дополнительным значениям)",
+    "pt": "login de instalador ativado (concede acesso a valores adicionais)",
+    "nl": "installateurslogin geactiveerd (geeft toegang tot extra waarden)",
+    "fr": "connexion installateur activée (donne accès à des valeurs supplémentaires)",
+    "it": "login installatore attivato (consente l'accesso a valori aggiuntivi)",
+    "es": "inicio de sesión de instalador activado (concede acceso a valores adicionales)",
+    "pl": "logowanie instalatora aktywowane (odblokowuje dodatkowe wartości)"
+  },
+  "installerpw": {
+    "en": "installer password",
+    "de": "Installateur-Passwort",
+    "ru": "пароль установщика",
+    "pt": "senha do instalador",
+    "nl": "installateurswachtwoord",
+    "fr": "mot de passe de l'installateur",
+    "it": "password installatore",
+    "es": "contraseña de instalador",
+    "pl": "hasło instalatora"
   }
 }
