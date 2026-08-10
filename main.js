@@ -559,12 +559,47 @@ async function accumulateMonthlyPerDevice() {
     }
 } // END accumulateMonthlyPerDevice
 
+// Only actual apartment/common-area consumption meters are billed - WR* are inverters
+// (production, not consumption) and 'Gesamt' is a system-wide total that would double
+// count against the individual apartment rows.
+function isBillableMeter(name) {
+    return /^WHG \d+$/.test(name) || name === 'Allgemein';
+}
+
+async function getTariffForMonth(year, month) {
+    // Per-month tariff, editable by the landlord in the object tree. Created on first
+    // use (seeded from Tarif.default) so it shows up ready to edit for every billed month,
+    // instead of only existing for months someone happened to type in manually.
+    const id = `Tarif.${year}.${month}`;
+    await adapter.setObjectNotExistsAsync(id, {
+        type: 'state',
+        common: {
+            name: `Tarif ${month}/${year}`,
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: true,
+            unit: 'CHF/kWh',
+            desc: `Tariff for ${month}/${year}, falls back to Tarif.default when unset`,
+        },
+        native: {},
+    });
+
+    const monthTariff = await adapter.getStateAsync(id);
+    if (monthTariff && monthTariff.val !== null && monthTariff.val !== undefined && monthTariff.val !== '') {
+        return Number(monthTariff.val);
+    }
+    const defaultTariff = await adapter.getStateAsync('Tarif.default');
+    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined ? Number(defaultTariff.val) : 0;
+} // END getTariffForMonth
+
 async function exportMeterReadings() {
     // Billing export for the property management company (Treuhänder): one row per
     // apartment/meter and month, in kWh, built from the per-device monthly archive
-    // (Historic.<year>.monthlyINV.<month>.<name>) plus the current running month.
+    // (Historic.<year>.monthlyINV.<month>.<name>) plus the current running month, with
+    // the editable per-month tariff applied to compute the amount owed.
     try {
-        const rows = [['Jahr', 'Monat', 'Zaehler', 'Verbrauch_kWh']];
+        const readings = []; // { year, month, name, kwh }
 
         const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*');
         for (const id of Object.keys(archived).sort()) {
@@ -577,17 +612,29 @@ async function exportMeterReadings() {
                 continue;
             }
             const [, year, month, name] = match;
-            rows.push([year, month, name, (Number(state.val) / 1000).toFixed(2)]);
+            if (isBillableMeter(name)) {
+                readings.push({ year, month, name, kwh: Number(state.val) / 1000 });
+            }
         }
 
         const now = new Date();
         const currentYear = String(now.getFullYear());
         const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
         for (const name of names) {
+            if (!isBillableMeter(name)) {
+                continue;
+            }
             const monthState = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
             if (monthState && monthState.val !== null && monthState.val !== undefined) {
-                rows.push([currentYear, currentMonth, name, (Number(monthState.val) / 1000).toFixed(2)]);
+                readings.push({ year: currentYear, month: currentMonth, name, kwh: Number(monthState.val) / 1000 });
             }
+        }
+
+        const rows = [['Wohnung', 'Jahr', 'Monat', 'Verbrauch_kWh', 'Tarif_CHF_kWh', 'Total_CHF']];
+        for (const r of readings) {
+            const tariff = await getTariffForMonth(r.year, r.month);
+            const total = r.kwh * tariff;
+            rows.push([r.name, r.year, r.month, r.kwh.toFixed(2), tariff.toFixed(4), total.toFixed(2)]);
         }
 
         const csv = rows.map(row => row.join(';')).join('\n');

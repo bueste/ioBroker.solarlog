@@ -779,6 +779,29 @@
         "desc": "File name of the last CSV export, downloadable via the adapter's file storage"
       },
       "native": {}
+    },
+    {
+      "_id": "Tarif",
+      "type": "channel",
+      "common": {
+        "name": "Tarif"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Tarif.default",
+      "type": "state",
+      "common": {
+        "name": "Default tariff",
+        "type": "number",
+        "role": "value",
+        "read": true,
+        "write": true,
+        "def": 0,
+        "unit": "CHF/kWh",
+        "desc": "Used for any month without its own Tarif.<year>.<month> override"
+      },
+      "native": {}
     }
   ]
 }
