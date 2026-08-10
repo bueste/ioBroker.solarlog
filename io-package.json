@@ -163,7 +163,9 @@
     "userpass": false,
     "userpw": "",
     "installerpass": false,
-    "installerpw": ""
+    "installerpw": "",
+    "backupAuto": false,
+    "backupKeep": 5
   },
   "objects": [],
   "instanceObjects": [
@@ -637,6 +639,130 @@
         "read": true,
         "write": false,
         "desc": "Number of mail error"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup",
+      "type": "channel",
+      "common": {
+        "name": "Backup"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.trigger",
+      "type": "state",
+      "common": {
+        "name": "Start backup now",
+        "type": "boolean",
+        "role": "button",
+        "read": false,
+        "write": true,
+        "def": false,
+        "desc": "Set to true to trigger a Solar-Log system backup (requires installer login)"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.status",
+      "type": "state",
+      "common": {
+        "name": "Backup status",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "def": "idle",
+        "desc": "idle | running | done | error"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.progress",
+      "type": "state",
+      "common": {
+        "name": "Backup progress",
+        "type": "number",
+        "role": "value",
+        "read": true,
+        "write": false,
+        "unit": "%",
+        "desc": "Backup export progress"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.lastSuccess",
+      "type": "state",
+      "common": {
+        "name": "Last successful backup",
+        "type": "string",
+        "role": "value.datetime",
+        "read": true,
+        "write": false,
+        "desc": "Timestamp of the last successful backup"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.lastFile",
+      "type": "state",
+      "common": {
+        "name": "Last backup file",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "desc": "File name of the last backup, downloadable via the adapter's file storage"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Backup.lastError",
+      "type": "state",
+      "common": {
+        "name": "Last backup error",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "desc": "Error message of the last failed backup, if any"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Export",
+      "type": "channel",
+      "common": {
+        "name": "Export"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Export.triggerMeterReadings",
+      "type": "state",
+      "common": {
+        "name": "Export meter readings as CSV",
+        "type": "boolean",
+        "role": "button",
+        "read": false,
+        "write": true,
+        "def": false,
+        "desc": "Set to true to export the recorded monthly/yearly meter readings as a CSV file"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Export.lastFile",
+      "type": "state",
+      "common": {
+        "name": "Last export file",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "desc": "File name of the last CSV export, downloadable via the adapter's file storage"
       },
       "native": {}
     }

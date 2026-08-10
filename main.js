@@ -99,6 +99,11 @@ let userName;
 let userPw;
 let installerPw;
 
+let backupAuto = false;
+let backupKeep = 5;
+let weeklyBackup;
+let backupRunning = false;
+
 function unload(callback) {
     try {
         restartTimer && clearTimeout(restartTimer);
@@ -106,6 +111,9 @@ function unload(callback) {
 
         jedeStunde && jedeStunde.cancel();
         jedeStunde = null;
+
+        weeklyBackup && weeklyBackup.cancel();
+        weeklyBackup = null;
 
         jedenTag && jedenTag.cancel();
         jedenTag = null;
@@ -184,6 +192,8 @@ async function main() {
         userPw = adapter.config.userpw;
         installerPass = !!adapter.config.installerpass;
         installerPw = adapter.config.installerpw;
+        backupAuto = !!adapter.config.backupAuto;
+        backupKeep = parseInt(adapter.config.backupKeep, 10) || 5;
 
         // Installer login is a superset of user login (grants access to additional values),
         // so it takes precedence when both are configured.
@@ -304,12 +314,171 @@ async function main() {
             }
         });
 
-        // all states changes inside the adapters namespace are subscribed
-        //adapter.subscribeStates('*');
+        if (backupAuto) {
+            weeklyBackup = schedule.scheduleJob('0 3 * * 0', async () => {
+                adapter.log.info('Starting scheduled weekly backup');
+                await runBackup();
+            });
+        }
+
+        adapter.subscribeStates('Backup.trigger');
+        adapter.subscribeStates('Export.triggerMeterReadings');
+        adapter.on('stateChange', async (id, state) => {
+            if (!state || state.ack) {
+                return;
+            }
+            if (id === `${adapter.namespace}.Backup.trigger`) {
+                await adapter.setStateAsync('Backup.trigger', false, true);
+                await runBackup();
+            } else if (id === `${adapter.namespace}.Export.triggerMeterReadings`) {
+                await adapter.setStateAsync('Export.triggerMeterReadings', false, true);
+                await exportMeterReadings();
+            }
+        });
     } catch (e) {
         adapter.log.warn(`main - Error: ${e.message}`);
     }
 } // endMain
+
+async function runBackup() {
+    if (backupRunning) {
+        adapter.log.warn('Backup already running, ignoring new trigger');
+        return;
+    }
+    if (!installerPass) {
+        adapter.log.warn('Backup requires installer login - enable it in the adapter settings first');
+        await adapter.setStateAsync('Backup.status', 'error', true);
+        await adapter.setStateAsync('Backup.lastError', 'installer login required', true);
+        return;
+    }
+
+    backupRunning = true;
+    await adapter.setStateAsync('Backup.status', 'running', true);
+    await adapter.setStateAsync('Backup.progress', 0, true);
+    await adapter.setStateAsync('Backup.lastError', '', true);
+
+    // The device requires an active installer session and rejects the backup
+    // endpoints without CSRF header + Referer, unlike the regular polling calls.
+    const backupOptions = {
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Accept: '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-SL-CSRF-PROTECTION': '1',
+            Referer: `${deviceIpAddress}/`,
+            Cookie: `banner_hidden=false; SolarLog=${dataToken}`,
+        },
+    };
+
+    try {
+        await login();
+
+        const start = await axios.post(`${deviceIpAddress}/getjp`, { 715: null }, backupOptions);
+        const startResult = start?.data?.['715'];
+        if (startResult !== 'OK') {
+            throw new Error(`Backup could not be started: ${JSON.stringify(startResult)}`);
+        }
+        adapter.log.info('Backup export started on the Solar-Log device');
+
+        // Backup export runs on-device (state 715 -> polling 801.777/778 -> state 3 = done).
+        // Large installations (years of minute-data) can take several minutes.
+        const timeoutMs = 15 * 60 * 1000;
+        const pollIntervalMs = 3000;
+        const deadline = Date.now() + timeoutMs;
+        let done = false;
+
+        while (Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+            const poll = await axios.post(
+                `${deviceIpAddress}/getjp`,
+                { 801: { 777: null, 778: null } },
+                backupOptions,
+            );
+            const state801 = poll?.data?.['801'] || {};
+            const stateCode = state801['777'];
+
+            if (stateCode === 3) {
+                done = true;
+                await adapter.setStateAsync('Backup.progress', 100, true);
+                break;
+            }
+            if (stateCode === -7 || stateCode === -9 || stateCode === 98 || stateCode === 99) {
+                throw new Error(`Backup export failed on device (state ${stateCode})`);
+            }
+
+            const progressRaw = state801['778'];
+            if (typeof progressRaw === 'string' && progressRaw.includes(';')) {
+                const parts = progressRaw.split(';').map(Number);
+                if (parts.length >= 2 && parts[1] > 0) {
+                    const percent = Math.round((parts[0] / parts[1]) * 100);
+                    await adapter.setStateAsync('Backup.progress', percent, true);
+                }
+            }
+        }
+
+        if (!done) {
+            throw new Error('Backup export timed out');
+        }
+
+        adapter.log.info('Backup export finished, downloading file');
+        const fileResponse = await axios.get(`${deviceIpAddress}/sec/solarlog_backup.dat`, {
+            headers: { Cookie: `banner_hidden=false; SolarLog=${dataToken}` },
+            responseType: 'arraybuffer',
+        });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `backup/solarlog_backup_${timestamp}.dat`;
+        await adapter.writeFileAsync(adapter.namespace, fileName, Buffer.from(fileResponse.data));
+
+        await adapter.setStateAsync('Backup.status', 'done', true);
+        await adapter.setStateAsync('Backup.lastSuccess', new Date().toISOString(), true);
+        await adapter.setStateAsync('Backup.lastFile', fileName, true);
+        adapter.log.info(`Backup saved as ${fileName} (${fileResponse.data.byteLength} bytes)`);
+
+        await pruneOldBackups();
+    } catch (e) {
+        adapter.log.warn(`Backup - Error: ${e.message}`);
+        await adapter.setStateAsync('Backup.status', 'error', true);
+        await adapter.setStateAsync('Backup.lastError', e.message, true);
+    } finally {
+        backupRunning = false;
+    }
+} // END runBackup
+
+async function pruneOldBackups() {
+    try {
+        const files = await adapter.readDirAsync(adapter.namespace, 'backup');
+        const backups = files.filter(f => f.file.startsWith('solarlog_backup_')).sort((a, b) => a.file < b.file ? 1 : -1);
+        for (const old of backups.slice(backupKeep)) {
+            await adapter.unlinkAsync(adapter.namespace, `backup/${old.file}`);
+            adapter.log.debug(`Removed old backup ${old.file}`);
+        }
+    } catch (e) {
+        adapter.log.debug(`pruneOldBackups - nothing to prune or error: ${e.message}`);
+    }
+} // END pruneOldBackups
+
+async function exportMeterReadings() {
+    try {
+        const states = await adapter.getStatesAsync('Historic.*');
+        const rows = [['id', 'value']];
+        for (const id of Object.keys(states).sort()) {
+            const state = states[id];
+            if (state && state.val !== null && state.val !== undefined) {
+                rows.push([id.replace(`${adapter.namespace}.`, ''), state.val]);
+            }
+        }
+        const csv = rows.map(row => row.join(';')).join('\n');
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `export/zaehlerstaende_${timestamp}.csv`;
+        await adapter.writeFileAsync(adapter.namespace, fileName, csv);
+        await adapter.setStateAsync('Export.lastFile', fileName, true);
+        adapter.log.info(`Meter readings exported as ${fileName}`);
+    } catch (e) {
+        adapter.log.warn(`exportMeterReadings - Error: ${e.message}`);
+    }
+} // END exportMeterReadings
 
 async function test() {
     try {

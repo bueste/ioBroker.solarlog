@@ -365,5 +365,38 @@ systemDictionary = {
     "it": "password installatore",
     "es": "contraseña de instalador",
     "pl": "hasło instalatora"
+  },
+  "backupAuto": {
+    "en": "automatic weekly backup (Sunday, 03:00)",
+    "de": "automatische wöchentliche Sicherung (Sonntag, 03:00 Uhr)",
+    "ru": "автоматическое еженедельное резервное копирование (воскресенье, 03:00)",
+    "pt": "backup semanal automático (domingo, 03:00)",
+    "nl": "automatische wekelijkse back-up (zondag, 03:00)",
+    "fr": "sauvegarde hebdomadaire automatique (dimanche, 3h00)",
+    "it": "backup settimanale automatico (domenica, 03:00)",
+    "es": "copia de seguridad semanal automática (domingo, 03:00)",
+    "pl": "automatyczna cotygodniowa kopia zapasowa (niedziela, 03:00)"
+  },
+  "backupKeep": {
+    "en": "number of backups to keep",
+    "de": "Anzahl aufzubewahrender Sicherungen",
+    "ru": "количество хранимых резервных копий",
+    "pt": "número de backups a manter",
+    "nl": "aantal te bewaren back-ups",
+    "fr": "nombre de sauvegardes à conserver",
+    "it": "numero di backup da conservare",
+    "es": "número de copias de seguridad a conservar",
+    "pl": "liczba przechowywanych kopii zapasowych"
+  },
+  "backupHint": {
+    "en": "Backups require installer login (see above) and can also be triggered manually via the 'Backup.trigger' state. Files are stored in the adapter's file storage and can be downloaded from there.",
+    "de": "Sicherungen benötigen den Installateur-Login (siehe oben) und können auch manuell über den State 'Backup.trigger' ausgelöst werden. Die Dateien werden im Dateispeicher des Adapters abgelegt und können dort heruntergeladen werden.",
+    "ru": "Для резервного копирования требуется вход установщика (см. выше), его можно также запустить вручную через состояние 'Backup.trigger'. Файлы сохраняются в хранилище файлов адаптера, откуда их можно скачать.",
+    "pt": "Os backups exigem login de instalador (veja acima) e também podem ser acionados manualmente através do estado 'Backup.trigger'. Os arquivos são armazenados no armazenamento de arquivos do adaptador e podem ser baixados de lá.",
+    "nl": "Back-ups vereisen installateurslogin (zie hierboven) en kunnen ook handmatig worden gestart via de status 'Backup.trigger'. Bestanden worden opgeslagen in de bestandsopslag van de adapter en kunnen daar worden gedownload.",
+    "fr": "Les sauvegardes nécessitent une connexion installateur (voir ci-dessus) et peuvent aussi être déclenchées manuellement via l'état 'Backup.trigger'. Les fichiers sont stockés dans le stockage de fichiers de l'adaptateur et peuvent y être téléchargés.",
+    "it": "I backup richiedono il login installatore (vedi sopra) e possono anche essere avviati manualmente tramite lo stato 'Backup.trigger'. I file vengono salvati nell'archivio file dell'adattatore e possono essere scaricati da lì.",
+    "es": "Las copias de seguridad requieren inicio de sesión de instalador (ver arriba) y también se pueden activar manualmente mediante el estado 'Backup.trigger'. Los archivos se guardan en el almacenamiento de archivos del adaptador y se pueden descargar allí.",
+    "pl": "Kopie zapasowe wymagają logowania instalatora (patrz wyżej) i można je również uruchomić ręcznie za pomocą stanu 'Backup.trigger'. Pliki są przechowywane w magazynie plików adaptera, skąd można je pobrać."
   }
 }
