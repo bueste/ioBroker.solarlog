@@ -752,8 +752,8 @@ systemDictionary = {
     "pl": "invalid value"
   },
   "reportRecipientMissingWarning": {
-    "en": "E-mail report is enabled but no recipient address is set - no report will be sent until you fill this in.",
-    "de": "E-Mail-Report ist aktiviert, aber keine Empfänger-Adresse eingetragen - es wird kein Report verschickt, bis das nachgeholt wird.",
+    "en": "E-mail report is enabled but the recipient address is missing or not a valid e-mail address - no report will be sent until this is fixed.",
+    "de": "E-Mail-Report ist aktiviert, aber die Empfänger-Adresse fehlt oder ist keine gültige E-Mail-Adresse - es wird kein Report verschickt, bis das behoben wird.",
     "ru": "E-mail report is enabled but no recipient address is set.",
     "pt": "E-mail report is enabled but no recipient address is set.",
     "nl": "E-mail report is enabled but no recipient address is set.",

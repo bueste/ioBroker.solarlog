@@ -24,6 +24,7 @@ const {
 } = require('./lib/db');
 const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
+const { isValidEmail } = require('./lib/validation');
 
 let adapter;
 
@@ -425,6 +426,13 @@ async function main() {
                 try {
                     if (!adapter.config.reportRecipient) {
                         throw new Error('No recipient e-mail address configured.');
+                    }
+                    if (!isValidEmail(adapter.config.reportRecipient)) {
+                        throw new Error(`"${adapter.config.reportRecipient}" is not a valid e-mail address.`);
+                    }
+                    const instanceCheck = await checkEmailInstance(getEmailInstance());
+                    if (!instanceCheck.ok) {
+                        throw new Error(instanceCheck.message);
                     }
                     await adapter.sendToAsync(getEmailInstance(), 'send', {
                         to: adapter.config.reportRecipient,
@@ -1139,6 +1147,28 @@ function getEmailInstance() {
 } // END getEmailInstance
 
 /**
+ * Checks that the configured email instance actually exists and is running, before we
+ * attempt to sendTo() it. Without this, a typo'd/removed instance name (e.g. "email.5"
+ * when only "email.0" exists) makes sendTo() silently do nothing - no error, no email,
+ * no indication anything went wrong - both for the manual "Send test e-mail" button and
+ * for the unattended scheduled report job.
+ *
+ * @param {string} instance e.g. "email.0"
+ * @returns {Promise<{ok: boolean, message: string}>}
+ */
+async function checkEmailInstance(instance) {
+    const instanceObj = await adapter.getForeignObjectAsync(`system.adapter.${instance}`);
+    if (!instanceObj) {
+        return { ok: false, message: `Instance "${instance}" does not exist.` };
+    }
+    const aliveState = await adapter.getForeignStateAsync(`system.adapter.${instance}.alive`);
+    if (!aliveState || !aliveState.val) {
+        return { ok: false, message: `Instance "${instance}" exists but is not running.` };
+    }
+    return { ok: true, message: '' };
+} // END checkEmailInstance
+
+/**
  * Builds and sends the scheduled monthly/quarterly/yearly report by email, per
  * lib/scheduling.js's decision. The file is written to the adapter's own file storage
  * FIRST, before attempting to send - so a working copy exists under export/sent/ even
@@ -1164,6 +1194,19 @@ async function sendScheduledReport(period) {
         adapter.log.info(`Scheduled report for ${period.label} saved: ${fileName}`);
 
         if (adapter.config.reportRecipient) {
+            if (!isValidEmail(adapter.config.reportRecipient)) {
+                adapter.log.error(
+                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: "${adapter.config.reportRecipient}" is not a valid e-mail address.`,
+                );
+                return;
+            }
+            const instanceCheck = await checkEmailInstance(getEmailInstance());
+            if (!instanceCheck.ok) {
+                adapter.log.error(
+                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: ${instanceCheck.message}`,
+                );
+                return;
+            }
             await adapter.sendToAsync(getEmailInstance(), 'send', {
                 to: adapter.config.reportRecipient,
                 subject: `Solar-Abrechnung ${period.label}`,
