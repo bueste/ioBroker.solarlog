@@ -26,6 +26,7 @@ const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
 const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
+const { enumerateMonthRange } = require('./lib/tariffs');
 
 let adapter;
 
@@ -452,6 +453,41 @@ async function main() {
                         adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
                     }
                 }
+            } else if (obj.command === 'bulkSetTariffs') {
+                try {
+                    const p = obj.message || {};
+                    const fromYear = Number(p.fromYear);
+                    const fromMonth = Number(p.fromMonth);
+                    const toYear = Number(p.toYear);
+                    const toMonth = Number(p.toMonth);
+                    const netzbezug = Number(p.netzbezug);
+                    const solarbezug = Number(p.solarbezug);
+                    const months = enumerateMonthRange(fromYear, fromMonth, toYear, toMonth);
+                    if (!months.length) {
+                        throw new Error('Invalid or reversed month range.');
+                    }
+                    if (!(netzbezug >= 0) || !(solarbezug >= 0)) {
+                        throw new Error('Tariff values must be numbers >= 0.');
+                    }
+                    for (const m of months) {
+                        await setTariffForMonth(m.year, String(m.month).padStart(2, '0'), netzbezug, solarbezug);
+                    }
+                    adapter.log.info(
+                        `Bulk tariff set: ${months.length} month(s) from ${fromMonth}/${fromYear} to ${toMonth}/${toYear} - Netzbezug ${netzbezug}, Solarbezug ${solarbezug} CHF/kWh.`,
+                    );
+                    if (obj.callback) {
+                        adapter.sendTo(
+                            obj.from,
+                            obj.command,
+                            { ok: true, count: months.length, message: `${months.length} Monat(e) aktualisiert.` },
+                            obj.callback,
+                        );
+                    }
+                } catch (e) {
+                    if (obj.callback) {
+                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
+                    }
+                }
             } else if (obj.command === 'testEmail') {
                 try {
                     if (!isValidEmailList(adapter.config.reportRecipient)) {
@@ -471,7 +507,7 @@ async function main() {
                     // e-mail" actually previews what a recipient will see, not a fixed,
                     // unrelated message.
                     const testContent = buildReportEmailContent(
-                        { label: 'TEST', fromDate: 'TEST-VON', toDate: 'TEST-BIS' },
+                        { label: '2026-01', fromDate: '2026-01-01', toDate: '2026-01-31' },
                         adapter.config.reportEmailSubject,
                         adapter.config.reportEmailBody,
                     );
@@ -1196,6 +1232,23 @@ async function ensureMonthlyTariffState(year, month) {
         DEFAULT_TARIFF_SOLARBEZUG,
     );
 } // END ensureMonthlyTariffState
+
+/**
+ * Explicitly (over)writes a month's tariff, unlike ensureMonthlyTariffState()/
+ * ensureValueState() which only ever SEED a value the first time an object is created
+ * and never touch it again afterwards. This is the write path for the Billing tab's
+ * bulk tariff-set tool - an intentional user edit, not a first-time default.
+ *
+ * @param {number} year
+ * @param {string} month "01".."12"
+ * @param {number} netzbezug
+ * @param {number} solarbezug
+ */
+async function setTariffForMonth(year, month, netzbezug, solarbezug) {
+    await ensureMonthlyTariffState(year, month);
+    await adapter.setStateAsync(`Tarif.${year}.${month}.netzbezug`, netzbezug, true);
+    await adapter.setStateAsync(`Tarif.${year}.${month}.solarbezug`, solarbezug, true);
+} // END setTariffForMonth
 
 async function ensureTariffDefaultObjects() {
     await ensureValueState(

@@ -183,6 +183,71 @@
       });
     }
 
+    var MONTH_WORDS = [
+      'monthJanuary', 'monthFebruary', 'monthMarch', 'monthApril', 'monthMay', 'monthJune',
+      'monthJuly', 'monthAugust', 'monthSeptember', 'monthOctober', 'monthNovember', 'monthDecember',
+    ];
+
+    function initTariffBulkSetUI() {
+      var now = new Date();
+      ['#tariffFromMonth', '#tariffToMonth'].forEach(function(sel) {
+        var $sel = $(sel);
+        $sel.empty();
+        MONTH_WORDS.forEach(function(word, idx) {
+          $sel.append($('<option></option>').attr('value', idx + 1).text(translateWord(word)));
+        });
+      });
+      $('#tariffFromMonth, #tariffToMonth').val(now.getMonth() + 1);
+      $('#tariffFromYear, #tariffToYear').val(now.getFullYear());
+      if (typeof M !== 'undefined' && M.FormSelect) {
+        M.FormSelect.init(document.getElementById('tariffFromMonth'));
+        M.FormSelect.init(document.getElementById('tariffToMonth'));
+      }
+
+      $('#tariffBulkSetButton').on('click', function() {
+        var fromMonth = parseInt($('#tariffFromMonth').val(), 10);
+        var fromYear = parseInt($('#tariffFromYear').val(), 10);
+        var toMonth = parseInt($('#tariffToMonth').val(), 10);
+        var toYear = parseInt($('#tariffToYear').val(), 10);
+        var netzbezug = parseFloat($('#tariffNetzbezug').val());
+        var solarbezug = parseFloat($('#tariffSolarbezug').val());
+
+        if (!(netzbezug >= 0) || !(solarbezug >= 0)) {
+          $('#tariffBulkSetResult').text(translateWord('tariffBulkInvalid')).css('color', 'red');
+          return;
+        }
+        if (toYear * 12 + toMonth < fromYear * 12 + fromMonth) {
+          $('#tariffBulkSetResult').text(translateWord('tariffBulkReversed')).css('color', 'red');
+          return;
+        }
+
+        var fromLabel = translateWord(MONTH_WORDS[fromMonth - 1]) + ' ' + fromYear;
+        var toLabel = translateWord(MONTH_WORDS[toMonth - 1]) + ' ' + toYear;
+        var count = (toYear * 12 + toMonth) - (fromYear * 12 + fromMonth) + 1;
+        var confirmMsg = translateWord('tariffBulkConfirm')
+          .replace('{count}', count)
+          .replace('{from}', fromLabel)
+          .replace('{to}', toLabel)
+          .replace('{netz}', netzbezug)
+          .replace('{solar}', solarbezug);
+        if (!window.confirm(confirmMsg)) {
+          return;
+        }
+
+        $('#tariffBulkSetResult').text('...').css('color', '');
+        sendTo(
+          null,
+          'bulkSetTariffs',
+          { fromYear: fromYear, fromMonth: fromMonth, toYear: toYear, toMonth: toMonth, netzbezug: netzbezug, solarbezug: solarbezug },
+          function(result) {
+            $('#tariffBulkSetResult')
+              .text((result && result.message) || '')
+              .css('color', result && result.ok ? 'green' : 'red');
+          },
+        );
+      });
+    }
+
     // the function loadSettings has to exist ...
     function load(settings, onChange) {
       // example: select elements with id=key and class=value and insert value
@@ -267,6 +332,7 @@
             .css('color', result && result.ok ? 'green' : 'red');
         });
       });
+      initTariffBulkSetUI();
 
       onShow();
 
@@ -544,6 +610,49 @@
               <a id="generateReportButton" class="waves-effect waves-light btn translate">generateReportButton</a>
               <span id="generateReportResult" style="margin-left: 12px;"></span>
             </div>
+          </div>
+        </div>
+
+        <h6 class="translate sub-title">tariffBulkSetTitle</h6>
+        <div class="row">
+          <div class="col s12">
+            <span class="translate">tariffBulkSetHint</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col s12 m6 l3">
+            <label class="chips-label translate">tariffBulkFrom</label>
+            <select id="tariffFromMonth"></select>
+          </div>
+          <div class="input-field col s6 m3 l2">
+            <input id="tariffFromYear" type="number" min="2020" max="2099" />
+            <label for="tariffFromYear" class="translate">tariffBulkYear</label>
+          </div>
+          <div class="col s12 m6 l3">
+            <label class="chips-label translate">tariffBulkTo</label>
+            <select id="tariffToMonth"></select>
+          </div>
+          <div class="input-field col s6 m3 l2">
+            <input id="tariffToYear" type="number" min="2020" max="2099" />
+            <label for="tariffToYear" class="translate">tariffBulkYear</label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <input id="tariffNetzbezug" type="number" step="0.01" min="0" />
+            <label for="tariffNetzbezug" class="translate">tariffBulkNetzbezug</label>
+            <span class="translate">tariffBulkNetzbezug</span>
+          </div>
+          <div class="input-field col s12 m6 l4">
+            <input id="tariffSolarbezug" type="number" step="0.01" min="0" />
+            <label for="tariffSolarbezug" class="translate">tariffBulkSolarbezug</label>
+            <span class="translate">tariffBulkSolarbezug</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col s12">
+            <a id="tariffBulkSetButton" class="waves-effect waves-light btn translate">tariffBulkSetButton</a>
+            <span id="tariffBulkSetResult" style="margin-left: 12px;"></span>
           </div>
         </div>
 

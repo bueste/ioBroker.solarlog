@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.10",
+    "version": "2.5.11",
     "news": {
+      "2.5.11": {
+        "en": "New: a bulk tariff-set tool on the Billing tab - pick a from/to month+year range and a Netzbezugspreis/Solarbezugspreis, and apply it to every month in that range at once, instead of editing Tarif.<year>.<month> one at a time in the object tree. Fix: dates shown to a reader (report e-mail placeholders {periode}/{von}/{bis}) now use Swiss format - a spelled-out month/year (\"August 2026\") and DD-MM-YYYY - instead of ISO \"2026-08\"/\"2026-08-01\". The XLSX report itself already spelled out the month; this was the one remaining place still showing ISO dates to a tenant.",
+        "de": "Neu: ein Bulk-Tarif-Werkzeug auf dem Billing-Tab - einen Von/Bis-Monat+Jahr-Zeitraum sowie Netzbezugspreis/Solarbezugspreis wählen und auf einmal für jeden Monat in diesem Zeitraum setzen, statt Tarif.<Jahr>.<Monat> einzeln im Objektbaum zu bearbeiten. Fix: Daten, die eine lesende Person zu sehen bekommt (Report-E-Mail-Platzhalter {periode}/{von}/{bis}), verwenden jetzt das Schweizer Format - ausgeschriebener Monat/Jahr (\"August 2026\") und TT-MM-JJJJ - statt ISO \"2026-08\"/\"2026-08-01\". Der XLSX-Bericht selbst schrieb den Monat bereits aus; das war die letzte verbliebene Stelle mit ISO-Daten für Mieter.",
+        "ru": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "pt": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "nl": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "fr": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "it": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "es": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO.",
+        "pl": "New: bulk tariff-set tool on the Billing tab. Fix: e-mail date placeholders now use Swiss format instead of ISO."
+      },
       "2.5.10": {
         "en": "New: the report recipient field now supports multiple addresses, entered as tags (type an address, press Enter/comma). New: a Cc field, also supporting multiple addresses. Both are validated address-by-address before Save.",
         "de": "Neu: Das Empfänger-Feld unterstützt jetzt mehrere Adressen, als Tags eingegeben (Adresse eintippen, Enter/Komma drücken). Neu: ein Cc-Feld, ebenfalls mit mehreren Adressen möglich. Beide werden vor dem Speichern Adresse für Adresse geprüft.",
