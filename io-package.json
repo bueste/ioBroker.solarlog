@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.6",
+    "version": "2.5.7",
     "news": {
+      "2.5.7": {
+        "en": "Security/audit pass: (1) the MariaDB connection now uses TLS encryption (it was previously plaintext across the public internet - server uses a self-signed cert, so this stops passive eavesdropping but not an active MITM; the real fix is restricting the DB's firewall to this host's IP). (2) Total Bezug CHF now always exactly reconciles with the displayed kWh figures on both the daily DB row and the monthly report row - it was being computed from unrounded/pre-summed values that could drift a few Rappen from what a tenant or auditor would get recomputing kWh x Tarif themselves. (3) Added an idempotency guard (Database.lastAccumulatedDate) so the nightly billing accumulation can never silently double-count a day's consumption into the running Zählerstand if it were ever triggered twice for the same date. (4) Patched several dependency vulnerabilities (axios, form-data, brace-expansion) via npm audit fix.",
+        "de": "Sicherheits-/Audit-Durchgang: (1) Die MariaDB-Verbindung nutzt jetzt TLS-Verschlüsselung (vorher unverschlüsselt über das öffentliche Internet - der Server verwendet ein selbstsigniertes Zertifikat, das stoppt passives Mitlesen, aber keinen aktiven MITM-Angriff; die eigentliche Lösung ist, die Firewall der DB auf die IP dieses Hosts zu beschränken). (2) \"Total Bezug CHF\" stimmt jetzt sowohl in der täglichen DB-Zeile als auch in der Monatszeile des Berichts immer exakt mit den angezeigten kWh-Werten überein - vorher wurde teils aus ungerundeten bzw. aufsummierten Werten gerechnet, was um einige Rappen von dem abweichen konnte, was ein Mieter oder Prüfer beim Nachrechnen (kWh x Tarif) selbst erhält. (3) Eine Idempotenz-Sperre (Database.lastAccumulatedDate) verhindert, dass die nächtliche Abrechnungs-Verarbeitung den laufenden Zählerstand verdoppelt, falls sie je zweimal für denselben Tag ausgelöst würde. (4) Mehrere Abhängigkeits-Schwachstellen (axios, form-data, brace-expansion) via npm audit fix behoben.",
+        "ru": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "pt": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "nl": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "fr": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "it": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "es": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes.",
+        "pl": "Security pass: TLS for MariaDB, exact CHF/kWh reconciliation in reports, idempotency guard against double-counting, dependency vulnerability fixes."
+      },
       "2.5.6": {
         "en": "Fix: the \"Prognose erhalten\" (get forecast) checkbox on the Advanced Settings tab had no explanation at all - added a hint describing what it does (fetches a free PV forecast from forecast.solar using the Location/Ausrichtung values below it, creates forecast.today/forecast.tomorrow).",
         "de": "Fix: Die Checkbox \"Prognose erhalten\" auf dem Tab Erweiterte Einstellungen hatte überhaupt keine Erklärung - ein Hinweistext wurde ergänzt, der beschreibt, was sie tut (ruft eine kostenlose PV-Ertragsprognose von forecast.solar ab, anhand der weiter unten eingetragenen Standort-/Ausrichtungswerte, erstellt forecast.today/forecast.tomorrow).",
@@ -930,6 +941,20 @@
         "write": false,
         "def": "",
         "desc": "ISO timestamp of the last connection check"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database.lastAccumulatedDate",
+      "type": "state",
+      "common": {
+        "name": "Last date the daily billing accumulation ran (YYYY-MM-DD)",
+        "type": "string",
+        "role": "value.datetime",
+        "read": true,
+        "write": false,
+        "def": "",
+        "desc": "Idempotency guard: accumulateMonthlyPerDevice() refuses to run again for a date already recorded here, so the running Zählerstand can never be double-counted by an accidental second run on the same day."
       },
       "native": {}
     },

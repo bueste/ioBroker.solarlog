@@ -662,6 +662,22 @@ async function accumulateMonthlyPerDevice() {
         const isFirstOfMonth = now.getDate() === 1;
         const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
+        // Guards against double-counting the running lifetime Zählerstand (yieldtotal):
+        // unlike the MariaDB row (upserted, safe to write twice for the same date), the
+        // Zählerstand is a running total that gets daysum ADDED on every call - a second
+        // run for the same calendar day (e.g. a restart landing in the same minute as the
+        // nightly cron somehow firing twice) would silently double-add today's consumption
+        // into every meter's lifetime reading, and thereafter Zählerstand-Ende minus
+        // Zählerstand-Anfang would no longer match the billed Verbrauch for that day - a
+        // silent, permanent drift a tenant or auditor could catch but not explain.
+        const lastRunState = await adapter.getStateAsync('Database.lastAccumulatedDate');
+        if (lastRunState && lastRunState.val === todayStr) {
+            adapter.log.warn(
+                `accumulateMonthlyPerDevice already ran today (${todayStr}) - skipping to avoid double-counting the Zählerstand.`,
+            );
+            return;
+        }
+
         const prodState = await adapter.getStateAsync('status.yieldday');
         const consState = await adapter.getStateAsync('status.consyieldday');
         const yieldWh = prodState && prodState.val !== null ? Number(prodState.val) : 0;
@@ -794,6 +810,11 @@ async function accumulateMonthlyPerDevice() {
         adapter.log.debug(
             `Accumulated per-device monthly totals (self-consumption ratio today: ${(ratio * 100).toFixed(1)}%)`,
         );
+        // Marks today as processed BEFORE the MariaDB write below, since the guard at the
+        // top of this function protects the Zählerstand states updated above (already
+        // done at this point) - a MariaDB hiccup afterwards must not make today eligible
+        // to re-run and double-count them.
+        await adapter.setStateAsync('Database.lastAccumulatedDate', todayStr, true);
 
         if (mariadbPool) {
             try {
@@ -868,6 +889,15 @@ async function ensureMariaDbPool() {
             password: adapter.config.mariadbPassword,
             database: adapter.config.mariadbDatabase,
             connectionLimit: 3,
+            // Encrypts the connection - without this, the password and every row of tenant
+            // billing data crossed the public internet in plaintext. rejectUnauthorized is
+            // false because this specific host presents a self-signed certificate (typical
+            // for a shared-hosting DB not meant for public exposure), so this stops passive
+            // eavesdropping but does NOT verify server identity against a CA - an active
+            // MITM on the network path could still impersonate the server. The real fix is
+            // operational: restrict the DB's remote-access firewall to this adapter's own
+            // IP, or pin the specific certificate. See the Billing tab hint / adapter docs.
+            ssl: { rejectUnauthorized: false },
         });
         // A connection pool is an EventEmitter - an unhandled 'error' event (e.g. the DB
         // dropping an idle connection in the background, unrelated to any single query)
@@ -1011,6 +1041,19 @@ async function ensureDatabaseObjects() {
             read: true,
             write: false,
             def: '',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.lastAccumulatedDate', {
+        type: 'state',
+        common: {
+            name: 'Last date the daily billing accumulation ran (YYYY-MM-DD)',
+            type: 'string',
+            role: 'value.datetime',
+            read: true,
+            write: false,
+            def: '',
+            desc: 'Idempotency guard: accumulateMonthlyPerDevice() refuses to run again for a date already recorded here, so the running Zählerstand can never be double-counted by an accidental second run on the same day.',
         },
         native: {},
     });

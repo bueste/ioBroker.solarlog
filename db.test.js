@@ -36,6 +36,23 @@ describe('buildMeterDailyRow', () => {
         expect(row.total_chf).to.equal(2);
     });
 
+    it('total_chf is always exactly reconcilable from the rounded kWh figures stored in the same row - not the raw pre-rounding inputs (a tenant or auditor must be able to recompute Solarbezug*Tarif + Netzbezug*Tarif from what they can see and get the stored total)', () => {
+        const row = buildMeterDailyRow({
+            date: '2026-08-20',
+            meterName: 'WHG 4',
+            zStartKwh: 0,
+            zEndeKwh: 10,
+            verbrauchKwh: 10,
+            solarKwh: 6.0004, // rounds to 6.000
+            netzKwh: 3.9996, // rounds to 4.000 - raw sum is 10, rounded sum is also 10
+            tarifNetz: 0.28,
+            tarifSolar: 0.2,
+        });
+        const recomputedFromDisplayedFigures =
+            Math.round((row.solarbezug_kwh * 0.2 + row.netzbezug_kwh * 0.28) * 100) / 100;
+        expect(row.total_chf).to.equal(recomputedFromDisplayedFigures);
+    });
+
     it('rounds kWh figures to 3 decimals and CHF to 2', () => {
         const row = buildMeterDailyRow({
             date: '2026-08-20',

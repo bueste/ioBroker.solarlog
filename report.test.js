@@ -44,6 +44,25 @@ describe('aggregateMeterRowsByMonth', () => {
         expect(result[0].totalChf).to.be.closeTo(4.16, 1e-9);
     });
 
+    it('the monthly Total Bezug CHF always reconciles exactly with the displayed monthly Solarstrombezug/Netzbezug kWh figures - it is NOT just the sum of each day\'s own (independently rounded) total_chf, which can drift from the correct monthly total', () => {
+        // 4 days of 0.125 kWh at a 0.1 CHF/kWh tariff: each day's OWN total_chf rounds
+        // down to 0.01 (0.125*0.1=0.0125 -> 0.01), so naively summing daily totals gives
+        // 0.04 - but the correct monthly figure, from the actual monthly kWh (0.5) times
+        // the tariff, is 0.05. A report showing 0.04 next to "0.5 kWh x 0.1 CHF/kWh" would
+        // not reconcile and would be indefensible to a tenant or auditor doing the maths.
+        const rows = [
+            dailyRow({ reading_date: '2026-08-01', solarbezug_kwh: 0.125, netzbezug_kwh: 0, tarif_solar: 0.1, total_chf: 0.01 }),
+            dailyRow({ reading_date: '2026-08-02', solarbezug_kwh: 0.125, netzbezug_kwh: 0, tarif_solar: 0.1, total_chf: 0.01 }),
+            dailyRow({ reading_date: '2026-08-03', solarbezug_kwh: 0.125, netzbezug_kwh: 0, tarif_solar: 0.1, total_chf: 0.01 }),
+            dailyRow({ reading_date: '2026-08-04', solarbezug_kwh: 0.125, netzbezug_kwh: 0, tarif_solar: 0.1, total_chf: 0.01 }),
+        ];
+        const result = aggregateMeterRowsByMonth(rows);
+        expect(result).to.have.lengthOf(1);
+        expect(result[0].solarbezugKwh).to.equal(0.5);
+        expect(result[0].totalChf).to.equal(0.05); // correct: 0.5 * 0.1
+        expect(result[0].totalChf).to.not.equal(0.04); // what naively summing daily totals would give
+    });
+
     it('keeps different meters and different months as separate rows', () => {
         const rows = [
             dailyRow({ meter_name: 'WHG 1', reading_date: '2026-08-01' }),
