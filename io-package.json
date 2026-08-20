@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.5",
+    "version": "2.5.6",
     "news": {
+      "2.5.6": {
+        "en": "Fix: the \"Prognose erhalten\" (get forecast) checkbox on the Advanced Settings tab had no explanation at all - added a hint describing what it does (fetches a free PV forecast from forecast.solar using the Location/Ausrichtung values below it, creates forecast.today/forecast.tomorrow).",
+        "de": "Fix: Die Checkbox \"Prognose erhalten\" auf dem Tab Erweiterte Einstellungen hatte überhaupt keine Erklärung - ein Hinweistext wurde ergänzt, der beschreibt, was sie tut (ruft eine kostenlose PV-Ertragsprognose von forecast.solar ab, anhand der weiter unten eingetragenen Standort-/Ausrichtungswerte, erstellt forecast.today/forecast.tomorrow).",
+        "ru": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "pt": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "nl": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "fr": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "it": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "es": "Fix: added a missing explanation for the \"get forecast\" checkbox.",
+        "pl": "Fix: added a missing explanation for the \"get forecast\" checkbox."
+      },
       "2.5.5": {
         "en": "Fix: the Abrechnung sheet of the XLSX report showed raw daily rows with a generic \"Zaehler\"/consumption layout instead of the requested tenant billing format - it now aggregates to one row per apartment per calendar month with columns Jahr, Monat (spelled out in German), Wohnung, Solarstrombezug kWh, Tarif Solarstrom, Netzbezug kWh, Tarif Netzbezug, Total Bezug CHF. isBillableMeter() (WHG */Allgemein only, excludes inverters WR* and the building-wide \"Gesamt\" total) is now shared between main.js and the report builder as a second, defensive filter, so a non-apartment meter can never end up on a tenant's bill even if it somehow got into MariaDB.",
         "de": "Fix: Das Abrechnungsblatt des XLSX-Berichts zeigte rohe Tageszeilen mit einem generischen \"Zaehler\"/Verbrauchs-Layout statt des gewünschten Mieter-Abrechnungsformats - es fasst jetzt zu einer Zeile pro Wohnung und Kalendermonat zusammen, mit den Spalten Jahr, Monat (ausgeschrieben), Wohnung, Solarstrombezug kWh, Tarif Solarstrom, Netzbezug kWh, Tarif Netzbezug, Total Bezug CHF. isBillableMeter() (nur WHG */Allgemein, schliesst Wechselrichter WR* und den gebäudeweiten \"Gesamt\"-Wert aus) wird jetzt zwischen main.js und dem Berichts-Generator geteilt, als zweiter, defensiver Filter - ein Nicht-Wohnungs-Zähler kann so nie auf einer Mieterabrechnung landen, selbst wenn er versehentlich in MariaDB gelandet wäre.",

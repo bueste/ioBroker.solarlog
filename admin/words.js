@@ -366,6 +366,17 @@ systemDictionary = {
     "es": "contraseña de instalador",
     "pl": "hasło instalatora"
   },
+  "forecastHint": {
+    "en": "Fetches a free PV production forecast for today/tomorrow from forecast.solar, using the Location and Ausrichtung (orientation) values configured further down this tab. Creates the forecast.today/forecast.tomorrow states (kWh). No account or API key needed, but forecast.solar's free tier is rate-limited.",
+    "de": "Ruft eine kostenlose PV-Ertragsprognose für heute/morgen von forecast.solar ab, anhand der weiter unten auf diesem Tab eingetragenen Standort- und Ausrichtungswerte. Erstellt die Zustände forecast.today/forecast.tomorrow (kWh). Kein Konto oder API-Key nötig, die kostenlose Stufe von forecast.solar ist aber in der Abfragehäufigkeit begrenzt.",
+    "ru": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "pt": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "nl": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "fr": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "it": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "es": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow.",
+    "pl": "Fetches a free PV production forecast from forecast.solar using the location/orientation values below. Creates forecast.today/forecast.tomorrow."
+  },
   "backup": {
     "en": "Backup",
     "de": "Backup",
