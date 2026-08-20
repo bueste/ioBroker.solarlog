@@ -48,15 +48,15 @@ systemDictionary = {
     "pl": "interwale sondowania produkcja / zużycie (s)"
   },
   "pollIntervalperiodic": {
-    "en": "polling interval average-/sumup values & other (min)",
-    "de": "Abfrageintervall Durchschnitts- / Summenwerte & andere (min)",
-    "ru": "интервал опроса средние / суммарные значения и другое (мин.)",
-    "pt": "média do intervalo de sondagem- / valores de soma e outros (min)",
-    "nl": "polling interval gemiddelde- / somwaarden & andere (min)",
-    "fr": "Intervalle d'interrogation valeurs moyennes / sommaires et autres (min)",
-    "it": "Intervallo di polling valori medi / di riepilogo e altro (min)",
-    "es": "Intervalo de sondeo valores promedio / sumatorio y otros (min)",
-    "pl": "wartości średnie / sumaryczne interwału odpytywania i inne (min)"
+    "en": "polling interval average-/sumup values & other (s)",
+    "de": "Abfrageintervall Durchschnitts- / Summenwerte & andere (s)",
+    "ru": "интервал опроса средние / суммарные значения и другое (с)",
+    "pt": "média do intervalo de sondagem- / valores de soma e outros (s)",
+    "nl": "polling interval gemiddelde- / somwaarden & andere (s)",
+    "fr": "Intervalle d'interrogation valeurs moyennes / sommaires et autres (s)",
+    "it": "Intervallo di polling valori medi / di riepilogo e altro (s)",
+    "es": "Intervalo de sondeo valores promedio / sumatorio y otros (s)",
+    "pl": "wartości średnie / sumaryczne interwału odpytywania i inne (s)"
   },
   "invimp": {
     "en": "Import of inverter and other devices data",

@@ -268,7 +268,7 @@ async function main() {
         }
         adapter.log.info(`Getting forecast data: ${forecast}`);
         const pollingTimecurrent = adapter.config.pollIntervalcurrent * 1000 || 30000;
-        const pollingTimeperiodic = adapter.config.pollIntervalperiodic * 60000 || 300000;
+        const pollingTimeperiodic = adapter.config.pollIntervalperiodic * 1000 || 30000; // seconds (fixed 2026-08: was minutes, inconsistent with pollIntervalcurrent and the also-broken admin field id)
         adapter.log.debug(`[INFO] Configured polling interval consumption/production: ${pollingTimecurrent}`);
         adapter.log.debug(`[INFO] Configured polling interval averages&other: ${pollingTimeperiodic}`);
         adapter.log.debug(`[START] Started Adapter with: ${adapter.config.host}`);
@@ -285,8 +285,7 @@ async function main() {
 
             testend = setInterval(async () => await test(), 2000); // Überprüfen, ob alle Channels angelegt sind.
 
-            fastPolling =
-                fastPolling || setInterval(async () => await logCheck(fastpollData), pollingTimecurrent + 20000); // poll states every [30] seconds
+            fastPolling = fastPolling || setInterval(async () => await logCheck(fastpollData), pollingTimecurrent); // poll states every pollIntervalcurrent seconds (removed the +20000ms fixed offset 2026-08: made the actual cadence silently 20s slower than configured)
 
             polling = polling || setInterval(async () => await logCheck(pollingData), pollingTimeperiodic); // poll states every [30] seconds
         } else {
