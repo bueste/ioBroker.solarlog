@@ -39,6 +39,16 @@
       } else {
         $('#_installerpw').hide();
       }
+      if ($('#mariadbEnabled').prop('checked')) {
+        $('#_mariadbConn').show();
+      } else {
+        $('#_mariadbConn').hide();
+      }
+      if ($('#reportEnabled').prop('checked')) {
+        $('#_reportConn').show();
+      } else {
+        $('#_reportConn').hide();
+      }
     }
 
     // the function loadSettings has to exist ...
@@ -67,6 +77,12 @@
         onShow();
       });
       $('#installerpass').on('change', function() {
+        onShow();
+      });
+      $('#mariadbEnabled').on('change', function() {
+        onShow();
+      });
+      $('#reportEnabled').on('change', function() {
         onShow();
       });
       onShow();
@@ -101,6 +117,7 @@
         <ul class="tabs">
           <li class="tab col s4"><a href="#tab-main" class="translate active">Basic Settings</a></li>
           <li class="tab col s4"><a href="#tab-advanced" class="translate">Advanced Settings</a></li>
+          <li class="tab col s4"><a href="#tab-billing" class="translate">Billing</a></li>
         </ul>
       </div>
       <div id="tab-main" class="col s12 page">
@@ -249,6 +266,94 @@
             <input id="azimuth" type="text" size="17" class="value" />
             <label for="azimuth" class="translate">azimuth:</label> (
             <span class="translate">-180 … 180 (-180 = north, -90 = east, 0 = south, 90 = west, 180 = north)</span>)
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-billing" class="col s12 page">
+        <div class="row">
+          <div class="col s12 m6 l4">
+            <img src="solarlog.png" class="logo" />
+          </div>
+        </div>
+        <h6 class="translate sub-title">mariadbSectionTitle</h6>
+        <div class="row">
+          <div class="col s12">
+            <span class="translate">mariadbHint</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <input class="value" id="mariadbEnabled" type="checkbox" />
+            <label for="mariadbEnabled" class="translate">mariadbEnabled</label>
+          </div>
+        </div>
+        <div id="_mariadbConn">
+          <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="mariadbHost" type="text" />
+              <label for="mariadbHost" class="translate">mariadbHost</label>
+              <span class="translate">mariadbHost</span>
+            </div>
+            <div class="input-field col s12 m6 l2">
+              <input class="value" id="mariadbPort" type="number" />
+              <label for="mariadbPort" class="translate">mariadbPort</label>
+              <span class="translate">mariadbPort</span>
+            </div>
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="mariadbDatabase" type="text" />
+              <label for="mariadbDatabase" class="translate">mariadbDatabase</label>
+              <span class="translate">mariadbDatabase</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="mariadbUser" type="text" autocomplete="off" />
+              <label for="mariadbUser" class="translate">mariadbUser</label>
+              <span class="translate">mariadbUser</span>
+            </div>
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="mariadbPassword" type="password" autocomplete="new-password" />
+              <label for="mariadbPassword" class="translate">mariadbPassword</label>
+              <span class="translate">mariadbPassword</span>
+            </div>
+          </div>
+        </div>
+
+        <h6 class="translate sub-title">reportSectionTitle</h6>
+        <div class="row">
+          <div class="col s12">
+            <span class="translate">reportHint</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <input class="value" id="reportEnabled" type="checkbox" />
+            <label for="reportEnabled" class="translate">reportEnabled</label>
+          </div>
+        </div>
+        <div id="_reportConn">
+          <div class="row">
+            <div class="input-field col s12 m6 l6">
+              <input class="value" id="reportRecipient" type="text" />
+              <label for="reportRecipient" class="translate">reportRecipient</label>
+              <span class="translate">reportRecipient</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <select class="value" id="reportSchedule">
+                <option value="monthly" class="translate">reportScheduleMonthly</option>
+                <option value="quarterly" class="translate">reportScheduleQuarterly</option>
+                <option value="yearly" class="translate">reportScheduleYearly</option>
+              </select>
+              <label for="reportSchedule" class="translate">reportSchedule</label>
+            </div>
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="reportCutoffDay" type="number" min="1" max="28" />
+              <label for="reportCutoffDay" class="translate">reportCutoffDay</label>
+              <span class="translate">reportCutoffDay</span>
+            </div>
           </div>
         </div>
       </div>

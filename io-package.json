@@ -138,18 +138,20 @@
     ],
     "protectedNative": [
       "userpw",
-      "installerpw"
+      "installerpw",
+      "mariadbPassword"
     ],
     "encryptedNative": [
       "userpw",
-      "installerpw"
+      "installerpw",
+      "mariadbPassword"
     ]
   },
   "native": {
     "host": "",
     "port": 80,
     "pollIntervalcurrent": 30,
-    "pollIntervalperiodic": 5,
+    "pollIntervalperiodic": 30,
     "invimp": false,
     "numinv": 0,
     "forecast": false,
@@ -165,7 +167,17 @@
     "installerpass": false,
     "installerpw": "",
     "backupAuto": false,
-    "backupKeep": 5
+    "backupKeep": 5,
+    "mariadbEnabled": false,
+    "mariadbHost": "",
+    "mariadbPort": 3306,
+    "mariadbUser": "",
+    "mariadbPassword": "",
+    "mariadbDatabase": "",
+    "reportEnabled": false,
+    "reportRecipient": "",
+    "reportSchedule": "monthly",
+    "reportCutoffDay": 5
   },
   "objects": [],
   "instanceObjects": [
@@ -799,7 +811,71 @@
         "role": "text",
         "read": true,
         "write": false,
-        "desc": "File name of the last CSV export, downloadable via the adapter's file storage"
+        "desc": "File name of the last XLSX export, downloadable via the adapter's file storage"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database",
+      "type": "channel",
+      "common": {
+        "name": "Database"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database.testConnection",
+      "type": "state",
+      "common": {
+        "name": "Test MariaDB connection now",
+        "type": "boolean",
+        "role": "button",
+        "read": false,
+        "write": true,
+        "def": false,
+        "desc": "Set to true to (re)connect and run a test query against MariaDB right now, updating Database.connected/lastCheckMessage"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database.connected",
+      "type": "state",
+      "common": {
+        "name": "MariaDB reachable",
+        "type": "boolean",
+        "role": "indicator.connected",
+        "read": true,
+        "write": false,
+        "def": false,
+        "desc": "Result of the last connection check (at adapter startup or via Database.testConnection)"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database.lastCheckMessage",
+      "type": "state",
+      "common": {
+        "name": "Last check result",
+        "type": "string",
+        "role": "text",
+        "read": true,
+        "write": false,
+        "def": "",
+        "desc": "\"OK\" or the error message from the last connection check"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Database.lastCheck",
+      "type": "state",
+      "common": {
+        "name": "Last check timestamp",
+        "type": "string",
+        "role": "value.datetime",
+        "read": true,
+        "write": false,
+        "def": "",
+        "desc": "ISO timestamp of the last connection check"
       },
       "native": {}
     },

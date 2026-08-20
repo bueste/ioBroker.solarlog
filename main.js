@@ -219,6 +219,7 @@ async function main() {
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
         await ensureMariaDbPool();
+        await checkDatabaseConnection();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
         numinv = 0;
@@ -373,16 +374,24 @@ async function main() {
 
         adapter.subscribeStates('Backup.trigger');
         adapter.subscribeStates('Export.triggerMeterReadings');
+        adapter.subscribeStates('Database.testConnection');
         adapter.on('stateChange', async (id, state) => {
             if (!state || state.ack) {
                 return;
             }
-            if (id === `${adapter.namespace}.Backup.trigger`) {
-                await adapter.setStateAsync('Backup.trigger', false, true);
-                await runBackup();
-            } else if (id === `${adapter.namespace}.Export.triggerMeterReadings`) {
-                await adapter.setStateAsync('Export.triggerMeterReadings', false, true);
-                await regenerateCurrentReport();
+            try {
+                if (id === `${adapter.namespace}.Backup.trigger`) {
+                    await adapter.setStateAsync('Backup.trigger', false, true);
+                    await runBackup();
+                } else if (id === `${adapter.namespace}.Export.triggerMeterReadings`) {
+                    await adapter.setStateAsync('Export.triggerMeterReadings', false, true);
+                    await regenerateCurrentReport();
+                } else if (id === `${adapter.namespace}.Database.testConnection`) {
+                    await adapter.setStateAsync('Database.testConnection', false, true);
+                    await checkDatabaseConnection();
+                }
+            } catch (e) {
+                adapter.log.warn(`stateChange(${id}) - Error: ${e.message}`);
             }
         });
     } catch (e) {
@@ -768,6 +777,14 @@ async function ensureMariaDbPool() {
             database: adapter.config.mariadbDatabase,
             connectionLimit: 3,
         });
+        // A connection pool is an EventEmitter - an unhandled 'error' event (e.g. the DB
+        // dropping an idle connection in the background, unrelated to any single query)
+        // is treated by Node as a thrown exception and can crash the whole adapter process
+        // if nothing is listening. This only logs it; individual query failures are still
+        // caught at each call site below.
+        mariadbPool.on('error', e => {
+            adapter.log.warn(`MariaDB pool error (background, non-fatal): ${e.message}`);
+        });
         await ensureSchema(mariadbPool);
         adapter.log.info(
             'MariaDB connected, billing schema ensured (meter_daily/building_daily/meter_yearly_historic).',
@@ -777,6 +794,52 @@ async function ensureMariaDbPool() {
         mariadbPool = null;
     }
 } // END ensureMariaDbPool
+
+/**
+ * Manual/on-demand connectivity check, wired to the Database.testConnection button.
+ * Also called once at adapter startup so Database.connected reflects reality without
+ * needing a manual trigger first. Tries to (re)establish the pool if it isn't up yet
+ * (e.g. the DB was unreachable at startup but has since come back).
+ */
+async function checkDatabaseConnection() {
+    const nowIso = new Date().toISOString();
+    try {
+        if (!adapter.config.mariadbEnabled) {
+            await adapter.setStateAsync('Database.connected', false, true);
+            await adapter.setStateAsync(
+                'Database.lastCheckMessage',
+                'MariaDB is disabled in the instance configuration.',
+                true,
+            );
+            await adapter.setStateAsync('Database.lastCheck', nowIso, true);
+            return;
+        }
+        if (!mariadbPool) {
+            await ensureMariaDbPool();
+        }
+        if (!mariadbPool) {
+            await adapter.setStateAsync('Database.connected', false, true);
+            await adapter.setStateAsync(
+                'Database.lastCheckMessage',
+                'Not connected - see the adapter log for the connection error.',
+                true,
+            );
+            await adapter.setStateAsync('Database.lastCheck', nowIso, true);
+            return;
+        }
+        try {
+            await mariadbPool.query('SELECT 1');
+            await adapter.setStateAsync('Database.connected', true, true);
+            await adapter.setStateAsync('Database.lastCheckMessage', 'OK', true);
+        } catch (e) {
+            await adapter.setStateAsync('Database.connected', false, true);
+            await adapter.setStateAsync('Database.lastCheckMessage', `Query failed: ${e.message}`, true);
+        }
+        await adapter.setStateAsync('Database.lastCheck', nowIso, true);
+    } catch (e) {
+        adapter.log.warn(`checkDatabaseConnection - Error: ${e.message}`);
+    }
+} // END checkDatabaseConnection
 
 async function ensureFeedinDayObject() {
     // Declared in io-package.json instanceObjects too, but js-controller does not
@@ -1031,18 +1094,22 @@ async function cleanupSentReports() {
  * today, sends it if so, and prunes sent-report copies older than 1 year regardless.
  */
 async function checkAndSendScheduledReport() {
-    await cleanupSentReports();
-    if (!adapter.config.reportEnabled) {
-        return;
-    }
-    const period = determineScheduledPeriod(
-        new Date(),
-        adapter.config.reportSchedule,
-        Number(adapter.config.reportCutoffDay) || 1,
-    );
-    if (period) {
-        adapter.log.info(`Scheduled report due today: ${period.label} (${period.fromDate} - ${period.toDate})`);
-        await sendScheduledReport(period);
+    try {
+        await cleanupSentReports();
+        if (!adapter.config.reportEnabled) {
+            return;
+        }
+        const period = determineScheduledPeriod(
+            new Date(),
+            adapter.config.reportSchedule,
+            Number(adapter.config.reportCutoffDay) || 1,
+        );
+        if (period) {
+            adapter.log.info(`Scheduled report due today: ${period.label} (${period.fromDate} - ${period.toDate})`);
+            await sendScheduledReport(period);
+        }
+    } catch (e) {
+        adapter.log.warn(`checkAndSendScheduledReport - Error: ${e.message}`);
     }
 } // END checkAndSendScheduledReport
 

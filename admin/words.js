@@ -398,5 +398,203 @@ systemDictionary = {
     "it": "I backup richiedono il login installatore (vedi sopra) e possono anche essere avviati manualmente tramite lo stato 'Backup.trigger'. I file vengono salvati nell'archivio file dell'adattatore e possono essere scaricati da lì.",
     "es": "Las copias de seguridad requieren inicio de sesión de instalador (ver arriba) y también se pueden activar manualmente mediante el estado 'Backup.trigger'. Los archivos se guardan en el almacenamiento de archivos del adaptador y se pueden descargar allí.",
     "pl": "Kopie zapasowe wymagają logowania instalatora (patrz wyżej) i można je również uruchomić ręcznie za pomocą stanu 'Backup.trigger'. Pliki są przechowywane w magazynie plików adaptera, skąd można je pobrać."
+  },
+  "Billing": {
+    "en": "Billing",
+    "de": "Abrechnung",
+    "ru": "Billing",
+    "pt": "Billing",
+    "nl": "Billing",
+    "fr": "Billing",
+    "it": "Billing",
+    "es": "Billing",
+    "pl": "Billing"
+  },
+  "mariadbSectionTitle": {
+    "en": "MariaDB billing journal",
+    "de": "MariaDB Abrechnungs-Journal",
+    "ru": "MariaDB billing journal",
+    "pt": "MariaDB billing journal",
+    "nl": "MariaDB billing journal",
+    "fr": "MariaDB billing journal",
+    "it": "MariaDB billing journal",
+    "es": "MariaDB billing journal",
+    "pl": "MariaDB billing journal"
+  },
+  "mariadbHint": {
+    "en": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night (not on every poll - daily figures don't need finer granularity). This is the source of truth for all XLSX reports below.",
+    "de": "Wenn aktiviert, wird jede Nacht eine Zeile pro Wohnungszähler plus eine gebäudeweite Zeile in MariaDB geschrieben (nicht bei jedem Poll - Tageswerte brauchen keine feinere Granularität). Das ist die Datenquelle für alle XLSX-Berichte unten.",
+    "ru": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "pt": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "nl": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "fr": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "it": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "es": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below.",
+    "pl": "If enabled, one row per apartment meter plus one building-wide row is written to MariaDB every night. This is the source of truth for all XLSX reports below."
+  },
+  "mariadbEnabled": {
+    "en": "Enable MariaDB billing journal",
+    "de": "MariaDB-Abrechnungs-Journal aktivieren",
+    "ru": "Enable MariaDB billing journal",
+    "pt": "Enable MariaDB billing journal",
+    "nl": "Enable MariaDB billing journal",
+    "fr": "Enable MariaDB billing journal",
+    "it": "Enable MariaDB billing journal",
+    "es": "Enable MariaDB billing journal",
+    "pl": "Enable MariaDB billing journal"
+  },
+  "mariadbHost": {
+    "en": "MariaDB host",
+    "de": "MariaDB Host",
+    "ru": "MariaDB host",
+    "pt": "MariaDB host",
+    "nl": "MariaDB host",
+    "fr": "MariaDB host",
+    "it": "MariaDB host",
+    "es": "MariaDB host",
+    "pl": "MariaDB host"
+  },
+  "mariadbPort": {
+    "en": "Port",
+    "de": "Port",
+    "ru": "Port",
+    "pt": "Port",
+    "nl": "Port",
+    "fr": "Port",
+    "it": "Port",
+    "es": "Port",
+    "pl": "Port"
+  },
+  "mariadbDatabase": {
+    "en": "Database name",
+    "de": "Datenbankname",
+    "ru": "Database name",
+    "pt": "Database name",
+    "nl": "Database name",
+    "fr": "Database name",
+    "it": "Database name",
+    "es": "Database name",
+    "pl": "Database name"
+  },
+  "mariadbUser": {
+    "en": "Username",
+    "de": "Benutzername",
+    "ru": "Username",
+    "pt": "Username",
+    "nl": "Username",
+    "fr": "Username",
+    "it": "Username",
+    "es": "Username",
+    "pl": "Username"
+  },
+  "mariadbPassword": {
+    "en": "Password",
+    "de": "Passwort",
+    "ru": "Password",
+    "pt": "Password",
+    "nl": "Password",
+    "fr": "Password",
+    "it": "Password",
+    "es": "Password",
+    "pl": "Password"
+  },
+  "reportSectionTitle": {
+    "en": "Automatic e-mail reporting",
+    "de": "Automatischer E-Mail-Report",
+    "ru": "Automatic e-mail reporting",
+    "pt": "Automatic e-mail reporting",
+    "nl": "Automatic e-mail reporting",
+    "fr": "Automatic e-mail reporting",
+    "it": "Automatic e-mail reporting",
+    "es": "Automatic e-mail reporting",
+    "pl": "Automatic e-mail reporting"
+  },
+  "reportHint": {
+    "en": "Sends the billing report (XLSX) for the completed period by e-mail (via the 'email.0' instance), on the configured cutoff day. The sent file is always saved under the adapter's own file storage for 1 year as a fallback, even if the e-mail delivery itself fails.",
+    "de": "Verschickt den Abrechnungsbericht (XLSX) für die abgeschlossene Periode per E-Mail (über die Instanz 'email.0'), am konfigurierten Stichtag. Die verschickte Datei wird immer zusätzlich 1 Jahr lang im eigenen Dateispeicher des Adapters abgelegt - als Absicherung, falls der E-Mail-Versand selbst fehlschlägt.",
+    "ru": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "pt": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "nl": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "fr": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "it": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "es": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback.",
+    "pl": "Sends the billing report (XLSX) for the completed period by e-mail, on the configured cutoff day. The sent file is always saved for 1 year as a fallback."
+  },
+  "reportEnabled": {
+    "en": "Enable scheduled e-mail report",
+    "de": "Geplanten E-Mail-Report aktivieren",
+    "ru": "Enable scheduled e-mail report",
+    "pt": "Enable scheduled e-mail report",
+    "nl": "Enable scheduled e-mail report",
+    "fr": "Enable scheduled e-mail report",
+    "it": "Enable scheduled e-mail report",
+    "es": "Enable scheduled e-mail report",
+    "pl": "Enable scheduled e-mail report"
+  },
+  "reportRecipient": {
+    "en": "Recipient e-mail address",
+    "de": "Empfänger-E-Mail-Adresse",
+    "ru": "Recipient e-mail address",
+    "pt": "Recipient e-mail address",
+    "nl": "Recipient e-mail address",
+    "fr": "Recipient e-mail address",
+    "it": "Recipient e-mail address",
+    "es": "Recipient e-mail address",
+    "pl": "Recipient e-mail address"
+  },
+  "reportSchedule": {
+    "en": "Reporting interval",
+    "de": "Report-Intervall",
+    "ru": "Reporting interval",
+    "pt": "Reporting interval",
+    "nl": "Reporting interval",
+    "fr": "Reporting interval",
+    "it": "Reporting interval",
+    "es": "Reporting interval",
+    "pl": "Reporting interval"
+  },
+  "reportScheduleMonthly": {
+    "en": "Monthly",
+    "de": "Monatlich",
+    "ru": "Monthly",
+    "pt": "Monthly",
+    "nl": "Monthly",
+    "fr": "Monthly",
+    "it": "Monthly",
+    "es": "Monthly",
+    "pl": "Monthly"
+  },
+  "reportScheduleQuarterly": {
+    "en": "Quarterly",
+    "de": "Quartalsweise",
+    "ru": "Quarterly",
+    "pt": "Quarterly",
+    "nl": "Quarterly",
+    "fr": "Quarterly",
+    "it": "Quarterly",
+    "es": "Quarterly",
+    "pl": "Quarterly"
+  },
+  "reportScheduleYearly": {
+    "en": "Yearly",
+    "de": "Jährlich",
+    "ru": "Yearly",
+    "pt": "Yearly",
+    "nl": "Yearly",
+    "fr": "Yearly",
+    "it": "Yearly",
+    "es": "Yearly",
+    "pl": "Yearly"
+  },
+  "reportCutoffDay": {
+    "en": "Cutoff day (1-28)",
+    "de": "Stichtag (1-28)",
+    "ru": "Cutoff day (1-28)",
+    "pt": "Cutoff day (1-28)",
+    "nl": "Cutoff day (1-28)",
+    "fr": "Cutoff day (1-28)",
+    "it": "Cutoff day (1-28)",
+    "es": "Cutoff day (1-28)",
+    "pl": "Cutoff day (1-28)"
   }
 }
