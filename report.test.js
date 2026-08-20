@@ -54,6 +54,13 @@ describe('aggregateMeterRowsByMonth', () => {
         expect(result).to.have.lengthOf(3);
     });
 
+    it('handles reading_date as a real Date object, not just a string (this is what the mariadb driver actually returns for a SQL DATE column)', () => {
+        const rows = [dailyRow({ reading_date: new Date(2026, 7, 20) })]; // August 20 2026, JS months are 0-based
+        const result = aggregateMeterRowsByMonth(rows);
+        expect(result).to.have.lengthOf(1);
+        expect(result[0]).to.include({ year: 2026, month: 8 });
+    });
+
     it('drops non-billable meters (inverters, building total) even if they somehow ended up in the data', () => {
         const rows = [
             dailyRow({ meter_name: 'WHG 1' }),
