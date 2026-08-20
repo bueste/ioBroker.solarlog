@@ -31,6 +31,13 @@ Check if historical data is to be collected and set the time of day when the his
 
 Forecast: optionally, the adapter gets forecast - data using the Forecast.Solar API. Actually, the today's and tomorrow's total kWh are predicted, refreshing every hour. More detailed or additional data is available on request (pls open an issue).
 
+### Billing tab (multi-apartment self-consumption billing)
+
+For properties with per-apartment sub-meters (e.g. a ZEV/tenant-billing setup): daily
+solar/grid consumption split, a MariaDB billing journal, XLSX reports, and scheduled
+e-mail delivery. See [docs/BILLING.md](docs/BILLING.md) for the full methodology,
+database schema, and reconciliation guarantees.
+
 ## Hardware
 
 Tested on:
