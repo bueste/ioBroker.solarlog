@@ -676,6 +676,35 @@ async function ensureBillingSplitStates(name) {
     });
 } // END ensureBillingSplitStates
 
+async function ensureDailySplitStates(name) {
+    await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugday`, {
+        type: 'state',
+        common: {
+            name: 'Solarbezug (heute)',
+            desc: 'Live, continuously-updating consumption sourced from own PV production today, Wh - for monitoring only, see accumulateMonthlyPerDevice() for the authoritative billed figure',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            unit: 'Wh',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync(`INV.${name}.netzbezugday`, {
+        type: 'state',
+        common: {
+            name: 'Netzbezug (heute)',
+            desc: 'Live, continuously-updating consumption sourced from the grid today, Wh - for monitoring only, see accumulateMonthlyPerDevice() for the authoritative billed figure',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            unit: 'Wh',
+        },
+        native: {},
+    });
+} // END ensureDailySplitStates
+
 // Only actual apartment/common-area consumption meters are billed - WR* are inverters
 // (production, not consumption) and 'Gesamt' is a system-wide total that would double
 // count against the individual apartment rows.
@@ -1396,10 +1425,30 @@ async function readSolarlogData(reqData, resData) {
                     }
                     const daysum = dataSUZ[indexsuz][1];
                     adapter.log.debug(`daysums: ${daysum}`);
+                    // Live, continuously-updating solar/grid split for TODAY per billable meter,
+                    // using the SAME building-wide production/consumption values from this exact
+                    // poll response (json[105]/json[111]) - so it's always in sync with the daysum
+                    // just written above, not a stale value from a separate poll cycle. This is
+                    // for live monitoring only; the authoritative billed figures are the once-nightly
+                    // accumulateMonthlyPerDevice() snapshot (see there for why: daysum can still tick
+                    // up until midnight).
+                    const dayRatio = selfConsumptionRatio(parseInt(json[105]) || 0, parseInt(json[111]) || 0);
                     for (let suzi = 0; suzi < namLeng; suzi++) {
                         if (deviceclasses[suzi] !== 'Batterie') {
                             adapter.log.debug(`INV.${names[suzi]}: ${daysum[suzi]}`);
                             await adapter.setStateAsync(`INV.${names[suzi]}.daysum`, daysum[suzi], true);
+
+                            if (isBillableMeter(names[suzi])) {
+                                await ensureDailySplitStates(names[suzi]);
+                                const meterDaysum = Number(daysum[suzi]) || 0;
+                                const solarToday = meterDaysum * dayRatio;
+                                await adapter.setStateAsync(`INV.${names[suzi]}.solarbezugday`, solarToday, true);
+                                await adapter.setStateAsync(
+                                    `INV.${names[suzi]}.netzbezugday`,
+                                    meterDaysum - solarToday,
+                                    true,
+                                );
+                            }
                         }
                     }
                 } catch (e) {
