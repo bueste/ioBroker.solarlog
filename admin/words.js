@@ -751,6 +751,39 @@ systemDictionary = {
     "es": "This e-mail instance is not installed on this system.",
     "pl": "This e-mail instance is not installed on this system."
   },
+  "reportEmailTemplateHint": {
+    "en": "Placeholders: {periode} (e.g. \"2026-08\"), {von} and {bis} (period start/end, YYYY-MM-DD). Plain text only - no HTML/formatting, so it displays correctly in every mail client.",
+    "de": "Platzhalter: {periode} (z.B. \"2026-08\"), {von} und {bis} (Periodenbeginn/-ende, JJJJ-MM-TT). Nur reiner Text - kein HTML/Formatierung, damit es in jedem Mail-Programm korrekt angezeigt wird.",
+    "ru": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "pt": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "nl": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "fr": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "it": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "es": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML.",
+    "pl": "Placeholders: {periode}, {von}, {bis}. Plain text only, no HTML."
+  },
+  "reportEmailSubject": {
+    "en": "E-mail subject",
+    "de": "E-Mail-Betreff",
+    "ru": "E-mail subject",
+    "pt": "E-mail subject",
+    "nl": "E-mail subject",
+    "fr": "E-mail subject",
+    "it": "E-mail subject",
+    "es": "E-mail subject",
+    "pl": "E-mail subject"
+  },
+  "reportEmailBody": {
+    "en": "E-mail text",
+    "de": "E-Mail-Text",
+    "ru": "E-mail text",
+    "pt": "E-mail text",
+    "nl": "E-mail text",
+    "fr": "E-mail text",
+    "it": "E-mail text",
+    "es": "E-mail text",
+    "pl": "E-mail text"
+  },
   "generateReportButton": {
     "en": "Generate current-period report now (XLSX)",
     "de": "Aktuellen Bericht jetzt erzeugen (XLSX)",

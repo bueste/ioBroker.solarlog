@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.8",
+    "version": "2.5.9",
     "news": {
+      "2.5.9": {
+        "en": "New: the scheduled/test report e-mail's subject and body are now freely editable on the Billing tab (placeholders {periode}/{von}/{bis}), instead of being hardcoded in the code. Plain text only, by design - the template is only ever sent via the e-mail adapter's \"text\" field, never as HTML, so it always displays correctly and can't be used to inject markup.",
+        "de": "Neu: Betreff und Text der geplanten/Test-Report-E-Mail sind jetzt im Billing-Tab frei editierbar (Platzhalter {periode}/{von}/{bis}), statt fest im Code hinterlegt zu sein. Bewusst nur reiner Text - die Vorlage wird ausschliesslich über das \"text\"-Feld des E-Mail-Adapters verschickt, nie als HTML, damit sie immer korrekt angezeigt wird und keine Formatierung eingeschleust werden kann.",
+        "ru": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "pt": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "nl": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "fr": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "it": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "es": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis}).",
+        "pl": "New: e-mail subject/body are now freely editable (plain text, placeholders {periode}/{von}/{bis})."
+      },
       "2.5.8": {
         "en": "Fix: reportCutoffDay had min/max=1..31 HTML attributes but nothing actually checked them - 32 (and any other out-of-range value) could be typed in and saved without any warning. Now validated like every other field on this tab. Fix: the e-mail instance field was free text with no validation at all (a typo like \"email.5\" was silently accepted and only failed at send time) - it's now a dropdown populated from the actually installed e-mail adapter instances on this system, with a clear warning if the currently saved value doesn't match any of them.",
         "de": "Fix: Der Stichtag (reportCutoffDay) hatte zwar min/max=1..31 als HTML-Attribute, aber nichts prüfte sie tatsächlich - 32 (und jeder andere Wert ausserhalb des Bereichs) konnte klaglos eingegeben und gespeichert werden. Wird jetzt wie jedes andere Feld auf diesem Tab geprüft. Fix: Das E-Mail-Instanz-Feld war reiner Freitext ohne jede Prüfung (ein Tippfehler wie \"email.5\" wurde klaglos übernommen und scheiterte erst beim Versand) - es ist jetzt eine Auswahlliste mit den tatsächlich auf diesem System installierten E-Mail-Adapterinstanzen, mit deutlicher Warnung, falls der gespeicherte Wert zu keiner davon passt.",
@@ -253,7 +264,9 @@
     "reportRecipient": "",
     "reportSchedule": "monthly",
     "reportCutoffDay": 5,
-    "emailInstance": "email.0"
+    "emailInstance": "email.0",
+    "reportEmailSubject": "Solar-Abrechnung {periode}",
+    "reportEmailBody": "Im Anhang die Abrechnung für {periode} ({von} bis {bis})."
   },
   "objects": [],
   "instanceObjects": [

@@ -25,6 +25,7 @@ const {
 const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
 const { isValidEmail } = require('./lib/validation');
+const { buildReportEmailContent } = require('./lib/email');
 
 let adapter;
 
@@ -463,10 +464,19 @@ async function main() {
                     if (!instanceCheck.ok) {
                         throw new Error(instanceCheck.message);
                     }
+                    // Renders the SAME configured subject/body template the real scheduled
+                    // report would use, with placeholder (test) values - so "Send test
+                    // e-mail" actually previews what a recipient will see, not a fixed,
+                    // unrelated message.
+                    const testContent = buildReportEmailContent(
+                        { label: 'TEST', fromDate: 'TEST-VON', toDate: 'TEST-BIS' },
+                        adapter.config.reportEmailSubject,
+                        adapter.config.reportEmailBody,
+                    );
                     await adapter.sendToAsync(getEmailInstance(), 'send', {
                         to: adapter.config.reportRecipient,
-                        subject: 'ioBroker.solarlog test e-mail',
-                        text: `This is a test e-mail from the solarlog adapter's Billing settings, sent via instance "${getEmailInstance()}".`,
+                        subject: `[Test] ${testContent.subject}`,
+                        text: `${testContent.text}\n\n(Dies ist eine Testnachricht, gesendet über Instanz "${getEmailInstance()}" - kein echter Bericht angehängt.)`,
                     });
                     if (obj.callback) {
                         adapter.sendTo(
@@ -1382,10 +1392,15 @@ async function sendScheduledReport(period) {
                 );
                 return;
             }
+            const emailContent = buildReportEmailContent(
+                period,
+                adapter.config.reportEmailSubject,
+                adapter.config.reportEmailBody,
+            );
             await adapter.sendToAsync(getEmailInstance(), 'send', {
                 to: adapter.config.reportRecipient,
-                subject: `Solar-Abrechnung ${period.label}`,
-                text: `Im Anhang die Abrechnung für ${period.label} (${period.fromDate} bis ${period.toDate}).`,
+                subject: emailContent.subject,
+                text: emailContent.text,
                 attachments: [
                     {
                         filename: fileName.split('/').pop(),
