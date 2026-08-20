@@ -11,6 +11,7 @@ const axios = require('axios');
 const https = require('node:https');
 const schedule = require('node-schedule');
 const bcrypt = require('bcryptjs');
+const { selfConsumptionRatio } = require('./lib/billing');
 
 let adapter;
 
@@ -517,16 +518,25 @@ async function ensureArchiveState(id, name, desc) {
 
 async function accumulateMonthlyPerDevice() {
     // Solar-Log only reports per-device totals per YEAR (code 854), not per month.
-    // We accumulate two things per device ourselves from the daily 'daysum' values:
+    // We accumulate several things per device ourselves from the daily 'daysum' values:
     //   - yieldmonth: running total for the current month, reset on the 1st
     //   - yieldtotal: a never-resetting lifetime meter reading (Zählerstand)
-    // On the 1st, before resetting yieldmonth, the just-finished month's total AND
-    // the Zählerstand readings at its start/end are archived permanently, so the CSV
-    // export can show Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang as a
-    // control figure instead of only the pre-computed delta.
+    //   - solarbezugmonth/netzbezugmonth: today's daysum split into a solar-sourced and
+    //     grid-sourced share (see selfConsumptionRatio), accumulated for the month
+    // On the 1st, before resetting these, the just-finished month's totals AND the
+    // Zählerstand readings at its start/end are archived permanently, so the CSV export
+    // can show Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang as a control figure
+    // instead of only the pre-computed delta.
     try {
         const now = new Date();
         const isFirstOfMonth = now.getDate() === 1;
+
+        const prodState = await adapter.getStateAsync('status.yieldday');
+        const consState = await adapter.getStateAsync('status.consyieldday');
+        const ratio = selfConsumptionRatio(
+            prodState && prodState.val !== null ? Number(prodState.val) : 0,
+            consState && consState.val !== null ? Number(consState.val) : 0,
+        );
 
         for (const name of names) {
             const monthId = `INV.${name}.yieldmonth`;
@@ -536,6 +546,9 @@ async function accumulateMonthlyPerDevice() {
                 continue;
             }
             const daysum = Number(dayState.val) || 0;
+            const billable = isBillableMeter(name);
+            const solarWh = billable ? daysum * ratio : 0;
+            const netzWh = billable ? daysum - solarWh : 0;
 
             const totalState = await adapter.getStateAsync(totalId);
             let zaehlerstandVorher;
@@ -551,6 +564,15 @@ async function accumulateMonthlyPerDevice() {
             }
             const zaehlerstandNachher = zaehlerstandVorher + daysum;
             await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
+
+            let solarMonthPrevious = 0;
+            let netzMonthPrevious = 0;
+            if (billable) {
+                const solarMonthState = await adapter.getStateAsync(`INV.${name}.solarbezugmonth`);
+                const netzMonthState = await adapter.getStateAsync(`INV.${name}.netzbezugmonth`);
+                solarMonthPrevious = solarMonthState && solarMonthState.val ? Number(solarMonthState.val) : 0;
+                netzMonthPrevious = netzMonthState && netzMonthState.val ? Number(netzMonthState.val) : 0;
+            }
 
             if (isFirstOfMonth) {
                 const monthState = await adapter.getStateAsync(monthId);
@@ -584,19 +606,76 @@ async function accumulateMonthlyPerDevice() {
                         'Meter reading at 23:59 on the last day of the month, Wh',
                     );
                     await adapter.setStateAsync(`${base}.zaehlerstandEnde`, zaehlerstandVorher, true);
+
+                    if (billable) {
+                        await ensureArchiveState(
+                            `${base}.solarbezug`,
+                            'Solarbezug',
+                            'Consumption sourced from own PV production, proportional building-wide allocation, Wh',
+                        );
+                        await adapter.setStateAsync(`${base}.solarbezug`, solarMonthPrevious, true);
+
+                        await ensureArchiveState(
+                            `${base}.netzbezug`,
+                            'Netzbezug',
+                            'Consumption sourced from the grid (Verbrauch minus Solarbezug), Wh',
+                        );
+                        await adapter.setStateAsync(`${base}.netzbezug`, netzMonthPrevious, true);
+                    }
                 }
                 await adapter.setStateAsync(monthId, daysum, true);
+                if (billable) {
+                    await ensureBillingSplitStates(name);
+                    await adapter.setStateAsync(`INV.${name}.solarbezugmonth`, solarWh, true);
+                    await adapter.setStateAsync(`INV.${name}.netzbezugmonth`, netzWh, true);
+                }
             } else {
                 const monthState = await adapter.getStateAsync(monthId);
                 const previous = monthState && monthState.val ? Number(monthState.val) : 0;
                 await adapter.setStateAsync(monthId, previous + daysum, true);
+                if (billable) {
+                    await ensureBillingSplitStates(name);
+                    await adapter.setStateAsync(`INV.${name}.solarbezugmonth`, solarMonthPrevious + solarWh, true);
+                    await adapter.setStateAsync(`INV.${name}.netzbezugmonth`, netzMonthPrevious + netzWh, true);
+                }
             }
         }
-        adapter.log.debug('Accumulated per-device monthly totals');
+        adapter.log.debug(
+            `Accumulated per-device monthly totals (self-consumption ratio today: ${(ratio * 100).toFixed(1)}%)`,
+        );
     } catch (e) {
         adapter.log.warn(`accumulateMonthlyPerDevice - Error: ${e.message}`);
     }
 } // END accumulateMonthlyPerDevice
+
+async function ensureBillingSplitStates(name) {
+    await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugmonth`, {
+        type: 'state',
+        common: {
+            name: 'Solarbezug (Monat)',
+            desc: 'Running month-to-date consumption sourced from own PV production, Wh',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            unit: 'Wh',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync(`INV.${name}.netzbezugmonth`, {
+        type: 'state',
+        common: {
+            name: 'Netzbezug (Monat)',
+            desc: 'Running month-to-date consumption sourced from the grid, Wh',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            unit: 'Wh',
+        },
+        native: {},
+    });
+} // END ensureBillingSplitStates
 
 // Only actual apartment/common-area consumption meters are billed - WR* are inverters
 // (production, not consumption) and 'Gesamt' is a system-wide total that would double
@@ -605,18 +684,42 @@ function isBillableMeter(name) {
     return /^WHG \d+$/.test(name) || name === 'Allgemein';
 }
 
+// Netzbezug (grid) and Solarbezug (own PV, sold to tenants below the grid price) are
+// billed at different rates - two separate, independently editable tariffs per month.
+// Defaults below are illustrative placeholders for Trimmis/Graubünden as of 2026 (typical
+// Swiss household grid tariff ~0.28 CHF/kWh incl. grid fees/taxes; a ZEV self-consumption
+// price is commonly set below that to stay attractive to tenants, ~0.20 CHF/kWh here) -
+// the Treuhänder/landlord MUST verify and correct these against the actual contracted
+// rates before relying on them for real billing.
+const DEFAULT_TARIFF_NETZBEZUG = 0.28;
+const DEFAULT_TARIFF_SOLARBEZUG = 0.2;
+
 async function ensureMonthlyTariffState(year, month) {
-    const id = `Tarif.${year}.${month}`;
-    await adapter.setObjectNotExistsAsync(id, {
+    await adapter.setObjectNotExistsAsync(`Tarif.${year}.${month}.netzbezug`, {
         type: 'state',
         common: {
-            name: `Tarif ${month}/${year}`,
+            name: `Netzbezugspreis ${month}/${year}`,
             type: 'number',
             role: 'value',
             read: true,
             write: true,
+            def: DEFAULT_TARIFF_NETZBEZUG,
             unit: 'CHF/kWh',
-            desc: `Tariff for ${month}/${year}, falls back to Tarif.default when unset`,
+            desc: `Grid tariff for ${month}/${year} (EXAMPLE default, verify actual rate), falls back to Tarif.default.netzbezug when unset`,
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync(`Tarif.${year}.${month}.solarbezug`, {
+        type: 'state',
+        common: {
+            name: `Solarbezugspreis ${month}/${year}`,
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: true,
+            def: DEFAULT_TARIFF_SOLARBEZUG,
+            unit: 'CHF/kWh',
+            desc: `Self-consumption (PV) tariff for ${month}/${year} (EXAMPLE default, verify actual rate), falls back to Tarif.default.solarbezug when unset`,
         },
         native: {},
     });
@@ -638,22 +741,30 @@ async function ensureAllMonthlyTariffsUntil(untilYear) {
     }
 } // END ensureAllMonthlyTariffsUntil
 
-async function getTariffForMonth(year, month) {
-    // Per-month tariff, editable by the landlord in the object tree (pre-created for
-    // the whole year at adapter startup, see ensureAllMonthlyTariffsForYear). Falls
-    // back to Tarif.default only if that specific month was never filled in.
-    const id = `Tarif.${year}.${month}`;
+async function getTariffsForMonth(year, month) {
+    // Per-month Netzbezug/Solarbezug tariffs, editable by the landlord in the object tree
+    // (pre-created for years ahead at adapter startup, see ensureAllMonthlyTariffsUntil).
+    // Each falls back to its own Tarif.default.* only if that specific month was never
+    // filled in.
     await ensureMonthlyTariffState(year, month);
 
-    const monthTariff = await adapter.getStateAsync(id);
-    if (monthTariff && monthTariff.val !== null && monthTariff.val !== undefined && monthTariff.val !== '') {
-        return Number(monthTariff.val);
+    async function resolve(kind, fallbackDefault) {
+        const monthState = await adapter.getStateAsync(`Tarif.${year}.${month}.${kind}`);
+        if (monthState && monthState.val !== null && monthState.val !== undefined && monthState.val !== '') {
+            return Number(monthState.val);
+        }
+        const defaultState = await adapter.getStateAsync(`Tarif.default.${kind}`);
+        if (defaultState && defaultState.val !== null && defaultState.val !== undefined && defaultState.val !== '') {
+            return Number(defaultState.val);
+        }
+        return fallbackDefault;
     }
-    const defaultTariff = await adapter.getStateAsync('Tarif.default');
-    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined
-        ? Number(defaultTariff.val)
-        : 0;
-} // END getTariffForMonth
+
+    return {
+        netzbezug: await resolve('netzbezug', DEFAULT_TARIFF_NETZBEZUG),
+        solarbezug: await resolve('solarbezug', DEFAULT_TARIFF_SOLARBEZUG),
+    };
+} // END getTariffsForMonth
 
 async function exportMeterReadings() {
     // Billing export for the property management company (Treuhänder): one row per
@@ -663,7 +774,7 @@ async function exportMeterReadings() {
     // month alongside the consumption delta, purely as a control figure so the
     // Treuhänder can verify Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang.
     try {
-        const readings = []; // { year, month, name, kwh, zStartKwh, zEndeKwh }
+        const readings = []; // { year, month, name, kwh, zStartKwh, zEndeKwh, solarKwh, netzKwh }
 
         const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*.monthsum');
         for (const id of Object.keys(archived).sort()) {
@@ -682,6 +793,8 @@ async function exportMeterReadings() {
             const base = `Historic.${year}.monthlyINV.${month}.${name}`;
             const startState = await adapter.getStateAsync(`${base}.zaehlerstandStart`);
             const endeState = await adapter.getStateAsync(`${base}.zaehlerstandEnde`);
+            const solarState = await adapter.getStateAsync(`${base}.solarbezug`);
+            const netzState = await adapter.getStateAsync(`${base}.netzbezug`);
             readings.push({
                 year,
                 month,
@@ -689,6 +802,8 @@ async function exportMeterReadings() {
                 kwh: Number(state.val) / 1000,
                 zStartKwh: startState && startState.val !== null ? Number(startState.val) / 1000 : null,
                 zEndeKwh: endeState && endeState.val !== null ? Number(endeState.val) / 1000 : null,
+                solarKwh: solarState && solarState.val !== null ? Number(solarState.val) / 1000 : 0,
+                netzKwh: netzState && netzState.val !== null ? Number(netzState.val) / 1000 : 0,
             });
         }
 
@@ -701,6 +816,8 @@ async function exportMeterReadings() {
             }
             const monthState = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
             const totalState = await adapter.getStateAsync(`INV.${name}.yieldtotal`);
+            const solarMonthState = await adapter.getStateAsync(`INV.${name}.solarbezugmonth`);
+            const netzMonthState = await adapter.getStateAsync(`INV.${name}.netzbezugmonth`);
             if (monthState && monthState.val !== null && monthState.val !== undefined) {
                 const zEnde = totalState && totalState.val !== null ? Number(totalState.val) : null;
                 readings.push({
@@ -710,6 +827,8 @@ async function exportMeterReadings() {
                     kwh: Number(monthState.val) / 1000,
                     zStartKwh: zEnde !== null ? (zEnde - Number(monthState.val)) / 1000 : null,
                     zEndeKwh: zEnde !== null ? zEnde / 1000 : null,
+                    solarKwh: solarMonthState && solarMonthState.val !== null ? Number(solarMonthState.val) / 1000 : 0,
+                    netzKwh: netzMonthState && netzMonthState.val !== null ? Number(netzMonthState.val) / 1000 : 0,
                 });
             }
         }
@@ -722,13 +841,16 @@ async function exportMeterReadings() {
                 'Zaehlerstand Monatsanfang (0:00 Uhr) kWh',
                 'Zaehlerstand Monatsende (23:59 Uhr) kWh',
                 'Verbrauch in kWh',
-                'Tarif',
+                'Solarbezug in kWh',
+                'Netzbezug in kWh',
+                'Tarif Netz CHF/kWh',
+                'Tarif Solar CHF/kWh',
                 'Total in CHF',
             ],
         ];
         for (const r of readings) {
-            const tariff = await getTariffForMonth(r.year, r.month);
-            const total = r.kwh * tariff;
+            const tariffs = await getTariffsForMonth(r.year, r.month);
+            const total = r.solarKwh * tariffs.solarbezug + r.netzKwh * tariffs.netzbezug;
             rows.push([
                 r.name,
                 r.year,
@@ -736,7 +858,10 @@ async function exportMeterReadings() {
                 r.zStartKwh !== null ? r.zStartKwh.toFixed(2) : '',
                 r.zEndeKwh !== null ? r.zEndeKwh.toFixed(2) : '',
                 r.kwh.toFixed(2),
-                tariff.toFixed(4),
+                r.solarKwh.toFixed(2),
+                r.netzKwh.toFixed(2),
+                tariffs.netzbezug.toFixed(4),
+                tariffs.solarbezug.toFixed(4),
                 total.toFixed(2),
             ]);
         }

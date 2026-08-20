@@ -789,17 +789,32 @@
       "native": {}
     },
     {
-      "_id": "Tarif.default",
+      "_id": "Tarif.default.netzbezug",
       "type": "state",
       "common": {
-        "name": "Default tariff",
+        "name": "Default Netzbezugspreis",
         "type": "number",
         "role": "value",
         "read": true,
         "write": true,
-        "def": 0,
+        "def": 0.28,
         "unit": "CHF/kWh",
-        "desc": "Used for any month without its own Tarif.<year>.<month> override"
+        "desc": "Grid tariff used for any month without its own Tarif.<year>.<month>.netzbezug override (EXAMPLE default, verify actual rate)"
+      },
+      "native": {}
+    },
+    {
+      "_id": "Tarif.default.solarbezug",
+      "type": "state",
+      "common": {
+        "name": "Default Solarbezugspreis",
+        "type": "number",
+        "role": "value",
+        "read": true,
+        "write": true,
+        "def": 0.2,
+        "unit": "CHF/kWh",
+        "desc": "Self-consumption (PV) tariff used for any month without its own Tarif.<year>.<month>.solarbezug override (EXAMPLE default, verify actual rate)"
       },
       "native": {}
     }
