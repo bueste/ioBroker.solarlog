@@ -17,6 +17,8 @@
     "@iobroker/adapter-core": "^3.3.2",
     "axios": "^1.7.9",
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
+    "mariadb": "^3.4.0",
     "node-schedule": "^2.1.1"
   },
   "devDependencies": {
