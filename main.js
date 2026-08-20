@@ -11,7 +11,7 @@ const axios = require('axios');
 const https = require('node:https');
 const schedule = require('node-schedule');
 const bcrypt = require('bcryptjs');
-const { selfConsumptionRatio } = require('./lib/billing');
+const { selfConsumptionRatio, isBillableMeter } = require('./lib/billing');
 const mariadb = require('mariadb');
 const {
     buildMeterDailyRow,
@@ -1078,13 +1078,6 @@ async function ensureDailySplitStates(name) {
         native: {},
     });
 } // END ensureDailySplitStates
-
-// Only actual apartment/common-area consumption meters are billed - WR* are inverters
-// (production, not consumption) and 'Gesamt' is a system-wide total that would double
-// count against the individual apartment rows.
-function isBillableMeter(name) {
-    return /^WHG \d+$/.test(name) || name === 'Allgemein';
-}
 
 // Netzbezug (grid) and Solarbezug (own PV, sold to tenants below the grid price) are
 // billed at different rates - two separate, independently editable tariffs per month.
