@@ -218,6 +218,7 @@ async function main() {
 
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
+        await ensureDatabaseObjects();
         await ensureMariaDbPool();
         await checkDatabaseConnection();
 
@@ -870,6 +871,59 @@ async function ensureFeedinDayObject() {
         native: {},
     });
 } // END ensureFeedinDayObject
+
+async function ensureDatabaseObjects() {
+    // Same js-controller instanceObjects-sync caveat as ensureFeedinDayObject() above -
+    // create explicitly so a plain file-update deploy (not a recognized version bump)
+    // still gets these objects before anything tries to setStateAsync() on them.
+    await adapter.setObjectNotExistsAsync('Database', {
+        type: 'channel',
+        common: { name: 'Database' },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.testConnection', {
+        type: 'state',
+        common: {
+            name: 'Test MariaDB connection now',
+            type: 'boolean',
+            role: 'button',
+            read: false,
+            write: true,
+            def: false,
+            desc: '(Re)connect and run a test query against MariaDB right now, updating Database.connected/lastCheckMessage',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.connected', {
+        type: 'state',
+        common: {
+            name: 'MariaDB reachable',
+            type: 'boolean',
+            role: 'indicator.connected',
+            read: true,
+            write: false,
+            def: false,
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.lastCheckMessage', {
+        type: 'state',
+        common: { name: 'Last check result', type: 'string', role: 'text', read: true, write: false, def: '' },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.lastCheck', {
+        type: 'state',
+        common: {
+            name: 'Last check timestamp',
+            type: 'string',
+            role: 'value.datetime',
+            read: true,
+            write: false,
+            def: '',
+        },
+        native: {},
+    });
+} // END ensureDatabaseObjects
 
 async function ensureDailySplitStates(name) {
     await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugday`, {
