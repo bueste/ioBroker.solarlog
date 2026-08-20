@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.9",
+    "version": "2.5.10",
     "news": {
+      "2.5.10": {
+        "en": "New: the report recipient field now supports multiple addresses, entered as tags (type an address, press Enter/comma). New: a Cc field, also supporting multiple addresses. Both are validated address-by-address before Save.",
+        "de": "Neu: Das Empfänger-Feld unterstützt jetzt mehrere Adressen, als Tags eingegeben (Adresse eintippen, Enter/Komma drücken). Neu: ein Cc-Feld, ebenfalls mit mehreren Adressen möglich. Beide werden vor dem Speichern Adresse für Adresse geprüft.",
+        "ru": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "pt": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "nl": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "fr": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "it": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "es": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address.",
+        "pl": "New: recipient field supports multiple addresses (tags). New: a Cc field, also multi-address."
+      },
       "2.5.9": {
         "en": "New: the scheduled/test report e-mail's subject and body are now freely editable on the Billing tab (placeholders {periode}/{von}/{bis}), instead of being hardcoded in the code. Plain text only, by design - the template is only ever sent via the e-mail adapter's \"text\" field, never as HTML, so it always displays correctly and can't be used to inject markup.",
         "de": "Neu: Betreff und Text der geplanten/Test-Report-E-Mail sind jetzt im Billing-Tab frei editierbar (Platzhalter {periode}/{von}/{bis}), statt fest im Code hinterlegt zu sein. Bewusst nur reiner Text - die Vorlage wird ausschliesslich über das \"text\"-Feld des E-Mail-Adapters verschickt, nie als HTML, damit sie immer korrekt angezeigt wird und keine Formatierung eingeschleust werden kann.",
@@ -262,6 +273,7 @@
     "mariadbDatabase": "",
     "reportEnabled": false,
     "reportRecipient": "",
+    "reportCc": "",
     "reportSchedule": "monthly",
     "reportCutoffDay": 5,
     "emailInstance": "email.0",

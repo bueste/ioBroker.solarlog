@@ -49,13 +49,63 @@
       } else {
         $('#_reportConn').hide();
       }
-      var recipientField = document.getElementById('reportRecipient');
-      if ($('#reportEnabled').prop('checked') && (!recipientField.value || !recipientField.checkValidity())) {
-        $('#_reportRecipientWarning').show();
-      } else {
-        $('#_reportRecipientWarning').hide();
-      }
+      var reportOn = $('#reportEnabled').prop('checked');
+      var recipients = getChipEmails('reportRecipientChips');
+      var ccs = getChipEmails('reportCcChips');
+      $('#_reportRecipientWarning').toggle(reportOn && recipients.length === 0);
+      $('#_reportRecipientInvalidWarning').toggle(
+        reportOn && (recipients.some(invalidEmail) || ccs.some(invalidEmail)),
+      );
     }
+
+    // Mirrors lib/validation.js isValidEmail() - kept in sync deliberately, see that
+    // file's comment for why this is intentionally simple, not full RFC 5322.
+    function invalidEmail(addr) {
+      return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr);
+    }
+
+    function getChipEmails(id) {
+      var el = document.getElementById(id);
+      var instance = typeof M !== 'undefined' && M.Chips ? M.Chips.getInstance(el) : null;
+      if (!instance) {
+        return [];
+      }
+      return instance.chipsData.map(function(c) {
+        return c.tag;
+      });
+    }
+
+    function initEmailChips(id, currentCsv) {
+      var data = (currentCsv || '')
+        .split(',')
+        .map(function(s) {
+          return s.trim();
+        })
+        .filter(function(s) {
+          return s.length > 0;
+        })
+        .map(function(tag) {
+          return { tag: tag };
+        });
+      var el = document.getElementById(id);
+      M.Chips.init(el, {
+        data: data,
+        placeholder: translateWord('reportRecipientChipsPlaceholder'),
+        secondaryPlaceholder: '+ E-Mail',
+        onChipAdd: function() {
+          onShow();
+          onChangeFromChip();
+        },
+        onChipDelete: function() {
+          onShow();
+          onChangeFromChip();
+        },
+      });
+    }
+
+    // set by load(), so chip add/delete can flag the page as dirty the same way the
+    // generic .value bindings do for every other field
+    var onChangeFromChip = function() {};
 
     function validateSettings() {
       var errors = [];
@@ -77,9 +127,15 @@
         errors.push(translateWord('backupHour') + ': ' + translateWord('invalidValue'));
       }
       if ($('#reportEnabled').prop('checked')) {
-        var recField = document.getElementById('reportRecipient');
-        if (!recField.value || !recField.checkValidity()) {
+        var recipients = getChipEmails('reportRecipientChips');
+        var ccs = getChipEmails('reportCcChips');
+        if (recipients.length === 0) {
           errors.push(translateWord('reportRecipient') + ': ' + translateWord('invalidValue'));
+        } else if (recipients.some(invalidEmail)) {
+          errors.push(translateWord('reportRecipient') + ': ' + translateWord('invalidValue'));
+        }
+        if (ccs.some(invalidEmail)) {
+          errors.push(translateWord('reportCc') + ': ' + translateWord('invalidValue'));
         }
         var cutoffField = document.getElementById('reportCutoffDay');
         if (!cutoffField.value || !cutoffField.checkValidity()) {
@@ -132,6 +188,9 @@
       // example: select elements with id=key and class=value and insert value
       if (!settings) return;
       populateEmailInstanceSelect(settings.emailInstance);
+      onChangeFromChip = onChange;
+      initEmailChips('reportRecipientChips', settings.reportRecipient);
+      initEmailChips('reportCcChips', settings.reportCc);
       $('.value').each(function() {
         var $key = $(this);
         var id = $key.attr('id');
@@ -233,6 +292,8 @@
           obj[$this.attr('id')] = $this.val();
         }
       });
+      obj.reportRecipient = getChipEmails('reportRecipientChips').join(',');
+      obj.reportCc = getChipEmails('reportCcChips').join(',');
       callback(obj);
     }
   </script>
@@ -500,11 +561,31 @@
         </div>
         <div id="_reportConn">
           <div class="row">
-            <div class="input-field col s12 m6 l6">
-              <input class="value" id="reportRecipient" type="email" />
-              <label for="reportRecipient" class="translate">reportRecipient</label>
-              <span class="translate">reportRecipient</span>
+            <div class="col s12 m6">
+              <label class="translate chips-label">reportRecipient</label>
+              <div class="chips" id="reportRecipientChips"></div>
             </div>
+            <div class="col s12 m6">
+              <label class="translate chips-label">reportCc</label>
+              <div class="chips" id="reportCcChips"></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span class="translate">reportRecipientChipsHint</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span id="_reportRecipientInvalidWarning" class="translate red-text" style="display: none;">reportRecipientInvalidWarning</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span id="_reportRecipientWarning" class="translate red-text" style="display: none;">reportRecipientMissingWarning</span>
+            </div>
+          </div>
+          <div class="row">
             <div class="input-field col s12 m6 l4">
               <select class="value" id="emailInstance"></select>
               <label for="emailInstance" class="translate">emailInstance</label>
@@ -513,11 +594,6 @@
           <div class="row">
             <div class="col s12">
               <span id="_emailInstanceWarning" class="translate red-text" style="display: none;">emailInstanceNotFoundWarning</span>
-            </div>
-          </div>
-          <div class="row">
-            <div class="col s12">
-              <span id="_reportRecipientWarning" class="translate red-text" style="display: none;">reportRecipientMissingWarning</span>
             </div>
           </div>
           <div class="row">

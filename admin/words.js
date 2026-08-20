@@ -653,15 +653,59 @@ systemDictionary = {
     "pl": "Enable scheduled e-mail report"
   },
   "reportRecipient": {
-    "en": "Recipient e-mail address",
-    "de": "Empfänger-E-Mail-Adresse",
-    "ru": "Recipient e-mail address",
-    "pt": "Recipient e-mail address",
-    "nl": "Recipient e-mail address",
-    "fr": "Recipient e-mail address",
-    "it": "Recipient e-mail address",
-    "es": "Recipient e-mail address",
-    "pl": "Recipient e-mail address"
+    "en": "Recipient e-mail address(es)",
+    "de": "Empfänger-E-Mail-Adresse(n)",
+    "ru": "Recipient e-mail address(es)",
+    "pt": "Recipient e-mail address(es)",
+    "nl": "Recipient e-mail address(es)",
+    "fr": "Recipient e-mail address(es)",
+    "it": "Recipient e-mail address(es)",
+    "es": "Recipient e-mail address(es)",
+    "pl": "Recipient e-mail address(es)"
+  },
+  "reportCc": {
+    "en": "Cc e-mail address(es)",
+    "de": "Cc E-Mail-Adresse(n)",
+    "ru": "Cc e-mail address(es)",
+    "pt": "Cc e-mail address(es)",
+    "nl": "Cc e-mail address(es)",
+    "fr": "Cc e-mail address(es)",
+    "it": "Cc e-mail address(es)",
+    "es": "Cc e-mail address(es)",
+    "pl": "Cc e-mail address(es)"
+  },
+  "reportRecipientChipsHint": {
+    "en": "Type an address and press Enter or comma to add it as a tag. Multiple recipients/Cc addresses are supported.",
+    "de": "Adresse eingeben und Enter oder Komma drücken, um sie als Tag hinzuzufügen. Mehrere Empfänger-/Cc-Adressen sind möglich.",
+    "ru": "Type an address and press Enter or comma to add it as a tag.",
+    "pt": "Type an address and press Enter or comma to add it as a tag.",
+    "nl": "Type an address and press Enter or comma to add it as a tag.",
+    "fr": "Type an address and press Enter or comma to add it as a tag.",
+    "it": "Type an address and press Enter or comma to add it as a tag.",
+    "es": "Type an address and press Enter or comma to add it as a tag.",
+    "pl": "Type an address and press Enter or comma to add it as a tag."
+  },
+  "reportRecipientChipsPlaceholder": {
+    "en": "+ E-mail",
+    "de": "+ E-Mail",
+    "ru": "+ E-mail",
+    "pt": "+ E-mail",
+    "nl": "+ E-mail",
+    "fr": "+ E-mail",
+    "it": "+ E-mail",
+    "es": "+ E-mail",
+    "pl": "+ E-mail"
+  },
+  "reportRecipientInvalidWarning": {
+    "en": "One or more of the entered addresses is not a valid e-mail address - no report will be sent until this is fixed.",
+    "de": "Eine oder mehrere der eingetragenen Adressen sind keine gültige E-Mail-Adresse - es wird kein Report verschickt, bis das behoben wird.",
+    "ru": "One or more of the entered addresses is not a valid e-mail address.",
+    "pt": "One or more of the entered addresses is not a valid e-mail address.",
+    "nl": "One or more of the entered addresses is not a valid e-mail address.",
+    "fr": "One or more of the entered addresses is not a valid e-mail address.",
+    "it": "One or more of the entered addresses is not a valid e-mail address.",
+    "es": "One or more of the entered addresses is not a valid e-mail address.",
+    "pl": "One or more of the entered addresses is not a valid e-mail address."
   },
   "reportSchedule": {
     "en": "Reporting interval",
@@ -829,8 +873,8 @@ systemDictionary = {
     "pl": "invalid value"
   },
   "reportRecipientMissingWarning": {
-    "en": "E-mail report is enabled but the recipient address is missing or not a valid e-mail address - no report will be sent until this is fixed.",
-    "de": "E-Mail-Report ist aktiviert, aber die Empfänger-Adresse fehlt oder ist keine gültige E-Mail-Adresse - es wird kein Report verschickt, bis das behoben wird.",
+    "en": "E-mail report is enabled but no recipient address has been added - no report will be sent until at least one is added.",
+    "de": "E-Mail-Report ist aktiviert, aber es wurde keine Empfänger-Adresse hinzugefügt - es wird kein Report verschickt, bis mindestens eine hinzugefügt wird.",
     "ru": "E-mail report is enabled but no recipient address is set.",
     "pt": "E-mail report is enabled but no recipient address is set.",
     "nl": "E-mail report is enabled but no recipient address is set.",

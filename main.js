@@ -24,7 +24,7 @@ const {
 } = require('./lib/db');
 const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
-const { isValidEmail } = require('./lib/validation');
+const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
 
 let adapter;
@@ -454,11 +454,13 @@ async function main() {
                 }
             } else if (obj.command === 'testEmail') {
                 try {
-                    if (!adapter.config.reportRecipient) {
-                        throw new Error('No recipient e-mail address configured.');
+                    if (!isValidEmailList(adapter.config.reportRecipient)) {
+                        throw new Error(
+                            `Recipient address(es) missing or invalid: "${adapter.config.reportRecipient || ''}"`,
+                        );
                     }
-                    if (!isValidEmail(adapter.config.reportRecipient)) {
-                        throw new Error(`"${adapter.config.reportRecipient}" is not a valid e-mail address.`);
+                    if (!isValidEmailList(adapter.config.reportCc, true)) {
+                        throw new Error(`Cc address(es) invalid: "${adapter.config.reportCc || ''}"`);
                     }
                     const instanceCheck = await checkEmailInstance(getEmailInstance());
                     if (!instanceCheck.ok) {
@@ -473,8 +475,11 @@ async function main() {
                         adapter.config.reportEmailSubject,
                         adapter.config.reportEmailBody,
                     );
+                    const testTo = parseEmailList(adapter.config.reportRecipient).join(', ');
+                    const testCc = parseEmailList(adapter.config.reportCc).join(', ');
                     await adapter.sendToAsync(getEmailInstance(), 'send', {
-                        to: adapter.config.reportRecipient,
+                        to: testTo,
+                        ...(testCc ? { cc: testCc } : {}),
                         subject: `[Test] ${testContent.subject}`,
                         text: `${testContent.text}\n\n(Dies ist eine Testnachricht, gesendet über Instanz "${getEmailInstance()}" - kein echter Bericht angehängt.)`,
                     });
@@ -484,7 +489,7 @@ async function main() {
                             obj.command,
                             {
                                 ok: true,
-                                message: `Sent via ${getEmailInstance()} to ${adapter.config.reportRecipient}.`,
+                                message: `Sent via ${getEmailInstance()} to ${testTo}${testCc ? ` (Cc: ${testCc})` : ''}.`,
                             },
                             obj.callback,
                         );
@@ -1379,9 +1384,15 @@ async function sendScheduledReport(period) {
         adapter.log.info(`Scheduled report for ${period.label} saved: ${fileName}`);
 
         if (adapter.config.reportRecipient) {
-            if (!isValidEmail(adapter.config.reportRecipient)) {
+            if (!isValidEmailList(adapter.config.reportRecipient)) {
                 adapter.log.error(
-                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: "${adapter.config.reportRecipient}" is not a valid e-mail address.`,
+                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: recipient address(es) invalid: "${adapter.config.reportRecipient}"`,
+                );
+                return;
+            }
+            if (!isValidEmailList(adapter.config.reportCc, true)) {
+                adapter.log.error(
+                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: Cc address(es) invalid: "${adapter.config.reportCc}"`,
                 );
                 return;
             }
@@ -1397,8 +1408,11 @@ async function sendScheduledReport(period) {
                 adapter.config.reportEmailSubject,
                 adapter.config.reportEmailBody,
             );
+            const to = parseEmailList(adapter.config.reportRecipient).join(', ');
+            const cc = parseEmailList(adapter.config.reportCc).join(', ');
             await adapter.sendToAsync(getEmailInstance(), 'send', {
-                to: adapter.config.reportRecipient,
+                to,
+                ...(cc ? { cc } : {}),
                 subject: emailContent.subject,
                 text: emailContent.text,
                 attachments: [
@@ -1410,7 +1424,7 @@ async function sendScheduledReport(period) {
                 ],
             });
             adapter.log.info(
-                `Scheduled report for ${period.label} sent to ${adapter.config.reportRecipient} via ${getEmailInstance()}.`,
+                `Scheduled report for ${period.label} sent to ${to}${cc ? ` (Cc: ${cc})` : ''} via ${getEmailInstance()}.`,
             );
         } else {
             adapter.log.warn(`Scheduled report for ${period.label} saved but not sent: no recipient configured.`);

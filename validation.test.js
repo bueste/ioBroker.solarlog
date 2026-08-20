@@ -1,7 +1,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { isValidEmail } = require('./lib/validation');
+const { isValidEmail, parseEmailList, isValidEmailList } = require('./lib/validation');
 
 describe('isValidEmail', () => {
     it('accepts a normal address', () => {
@@ -38,5 +38,42 @@ describe('isValidEmail', () => {
 
     it('rejects non-string input', () => {
         expect(isValidEmail(undefined)).to.equal(false);
+    });
+});
+
+describe('parseEmailList', () => {
+    it('splits and trims a comma-separated list', () => {
+        expect(parseEmailList('a@b.com, c@d.com,  e@f.com')).to.deep.equal(['a@b.com', 'c@d.com', 'e@f.com']);
+    });
+
+    it('drops empty entries from trailing/doubled commas', () => {
+        expect(parseEmailList('a@b.com,,c@d.com,')).to.deep.equal(['a@b.com', 'c@d.com']);
+    });
+
+    it('returns an empty array for empty/undefined input', () => {
+        expect(parseEmailList('')).to.deep.equal([]);
+        expect(parseEmailList(undefined)).to.deep.equal([]);
+    });
+});
+
+describe('isValidEmailList', () => {
+    it('accepts a list where every address is valid', () => {
+        expect(isValidEmailList('a@b.com, c@d.com')).to.equal(true);
+    });
+
+    it('rejects the whole list if any single address is invalid', () => {
+        expect(isValidEmailList('a@b.com, bullshit')).to.equal(false);
+    });
+
+    it('rejects an empty list by default (required field, e.g. recipients)', () => {
+        expect(isValidEmailList('')).to.equal(false);
+    });
+
+    it('accepts an empty list when allowEmpty is true (optional field, e.g. Cc)', () => {
+        expect(isValidEmailList('', true)).to.equal(true);
+    });
+
+    it('with allowEmpty still rejects a non-empty list containing an invalid address', () => {
+        expect(isValidEmailList('bullshit', true)).to.equal(false);
     });
 });
