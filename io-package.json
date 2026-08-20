@@ -1,8 +1,30 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.0",
+    "version": "2.5.2",
     "news": {
+      "2.5.2": {
+        "en": "Fix: MariaDB host/port fields had no format validation at all (garbage input was silently saved and only failed later at connect time) - now validated client-side before save. Fix: the auto-backup schedule was hardcoded to Sunday 03:00 and can now be configured (weekday + hour). Fix: enabling auto-backup with 0 backups to keep silently fell back to 5 without telling you - now blocked with a validation error. Fix: added missing translation for the \"Backup\" section heading (was showing the raw untranslated key). New: an e-mail instance field and a \"Send test e-mail\" button on the Billing settings page, plus a warning when the scheduled report is enabled without a recipient address.",
+        "de": "Fix: Die MariaDB Host/Port-Felder hatten überhaupt keine Formatprüfung (Unsinn wurde klaglos gespeichert und scheiterte erst beim Verbindungsversuch) - jetzt wird vor dem Speichern client-seitig geprüft. Fix: Der automatische Sicherungs-Zeitplan war fest auf Sonntag 03:00 Uhr codiert und ist jetzt konfigurierbar (Wochentag + Stunde). Fix: Automatische Sicherung mit 0 aufzubewahrenden Sicherungen fiel bisher klaglos auf 5 zurück - das wird jetzt als ungültige Eingabe blockiert. Fix: fehlende Übersetzung für die Überschrift \"Backup\" ergänzt (zeigte vorher den unübersetzten Rohtext). Neu: ein E-Mail-Instanz-Feld und ein \"Test-E-Mail senden\"-Button auf der Billing-Seite, sowie eine Warnung, wenn der geplante Report aktiviert ist, aber keine Empfänger-Adresse eingetragen wurde.",
+        "ru": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "pt": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "nl": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "fr": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "it": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "es": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning.",
+        "pl": "Fix: MariaDB host/port fields now validated before save. Fix: backup schedule (weekday/hour) is now configurable. Fix: 0 backups to keep is now blocked instead of silently defaulting. New: e-mail instance field, test e-mail button, missing-recipient warning."
+      },
+      "2.5.1": {
+        "en": "Fix: report cutoff day now accepts 1-31 (was capped at 28) and is clamped to the actual last day of the current month, so e.g. 31 reliably means \"last day of the month\" every month including February. New: a real \"Test connection\" button on the Billing settings page itself (in addition to the existing Database.testConnection object).",
+        "de": "Fix: Der Report-Stichtag akzeptiert jetzt 1-31 (vorher bei 28 gedeckelt) und wird automatisch auf den tatsächlich letzten Tag des jeweiligen Monats begrenzt - 31 bedeutet damit zuverlässig \"letzter Tag des Monats\", auch im Februar. Neu: ein echter \"Verbindung testen\"-Button direkt auf der Billing-Einstellungsseite (zusätzlich zum bestehenden Database.testConnection-Objekt).",
+        "ru": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "pt": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "nl": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "fr": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "it": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "es": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page.",
+        "pl": "Fix: report cutoff day now accepts 1-31 (clamped to the last day of the month). New: a real Test connection button on the Billing settings page."
+      },
       "2.5.0": {
         "en": "New: per-apartment Solarbezug/Netzbezug consumption split (proportional self-consumption allocation) with dual monthly tariffs. New: MariaDB daily billing journal (meter_daily/building_daily), XLSX billing reports (replaces CSV), scheduled e-mail reporting (monthly/quarterly/yearly) with 1-year sent-file retention, and a Database.testConnection button. New: status.feedinday (daily grid feed-in energy) logged to InfluxDB for Grafana. Fix: pollIntervalperiodic admin field never actually saved (wrong element id); it and the fast-poll interval now consistently mean seconds.",
         "de": "Neu: Solarbezug/Netzbezug-Aufteilung pro Wohnung (proportionale Eigenverbrauchszuteilung) mit zwei separaten Monatstarifen. Neu: MariaDB-Abrechnungs-Journal (täglich, meter_daily/building_daily), XLSX-Abrechnungsberichte (ersetzt CSV), planmässiger E-Mail-Versand (monatlich/quartalsweise/jährlich) mit 1 Jahr Aufbewahrung der versendeten Datei, sowie ein Database.testConnection-Button. Neu: status.feedinday (tägliche Netzeinspeisung) wird für Grafana in InfluxDB geloggt. Fix: das Admin-Feld pollIntervalperiodic hat wegen eines falschen Element-IDs nie tatsächlich gespeichert; es und das schnelle Poll-Intervall meinen jetzt einheitlich Sekunden.",
@@ -52,32 +74,6 @@
         "pl": "w zależności od aktualizacji aktualizatora 5.0, zwiększonego błędu, w zależności od aktualizacji aktualizacji\n",
         "uk": "готовий для js-controller 5.0, розширена помилка-ручка, оновлені\n",
         "zh-cn": "准备好供控制的p-5、加强错误处理、依赖性更新\n"
-      },
-      "2.2.6": {
-        "en": "bug in 'forecast' fixed, dependecies updated",
-        "de": "fehler in der prognose behoben, abhängigkeiten aktualisiert",
-        "ru": "исправлена ошибка в прогнозе, обновление зависимостей",
-        "pt": "bug in predict corrigido, dependências atualizada",
-        "nl": "quality over quantity (qoq) releases vertaling:",
-        "fr": "bug dans prévision fixe, les dépendances mise à jour",
-        "it": "bug in previsione fisso, dipendenze aggiornate",
-        "es": "bug en previsión fija, dependencias actualizadas",
-        "pl": "błąd w trybie prognozowym, zależnie od aktualizacji",
-        "uk": "помилка в прогнозі фіксовані, залежностей оновлено",
-        "zh-cn": "b 在预测固定的预测中,更新的依赖"
-      },
-      "2.2.5": {
-        "en": "testing fixed",
-        "de": "prüfverfahren",
-        "ru": "тестирование фиксированное",
-        "pt": "teste fixo",
-        "nl": "testen gerepareerd",
-        "fr": "essais fixes",
-        "it": "prova fissa",
-        "es": "pruebas fijas",
-        "pl": "test",
-        "uk": "тестування фіксованого",
-        "zh-cn": "固定试验"
       }
     },
     "titleLang": {
@@ -134,7 +130,7 @@
       "license": "MIT",
       "type": "free"
     },
-    "messagebox": false,
+    "messagebox": true,
     "connectionType": "local",
     "dataSource": "poll",
     "dependencies": [
@@ -179,6 +175,8 @@
     "installerpw": "",
     "backupAuto": false,
     "backupKeep": 5,
+    "backupWeekday": 0,
+    "backupHour": 3,
     "mariadbEnabled": false,
     "mariadbHost": "",
     "mariadbPort": 3306,
@@ -188,7 +186,8 @@
     "reportEnabled": false,
     "reportRecipient": "",
     "reportSchedule": "monthly",
-    "reportCutoffDay": 5
+    "reportCutoffDay": 5,
+    "emailInstance": "email.0"
   },
   "objects": [],
   "instanceObjects": [

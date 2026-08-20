@@ -234,6 +234,8 @@ async function main() {
         installerPw = adapter.config.installerpw;
         backupAuto = !!adapter.config.backupAuto;
         backupKeep = parseInt(adapter.config.backupKeep, 10) || 5;
+        const backupWeekday = Math.min(6, Math.max(0, parseInt(adapter.config.backupWeekday, 10) || 0));
+        const backupHour = Math.min(23, Math.max(0, parseInt(adapter.config.backupHour, 10) || 0));
 
         // Installer login is a superset of user login (grants access to additional values),
         // so it takes precedence when both are configured.
@@ -363,7 +365,7 @@ async function main() {
         reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => checkAndSendScheduledReport());
 
         if (backupAuto) {
-            weeklyBackup = schedule.scheduleJob('0 3 * * 0', async () => {
+            weeklyBackup = schedule.scheduleJob(`0 ${backupHour} * * ${backupWeekday}`, async () => {
                 if (await hasPlantDataChangedSinceLastBackup()) {
                     adapter.log.info('Starting scheduled weekly backup (plant data changed)');
                     await runBackup();
@@ -393,6 +395,58 @@ async function main() {
                 }
             } catch (e) {
                 adapter.log.warn(`stateChange(${id}) - Error: ${e.message}`);
+            }
+        });
+
+        // Lets the admin config page's "Test connection"/"Send test e-mail" buttons
+        // (Billing tab) get an immediate result back. Both test the CURRENTLY SAVED
+        // config (adapter.config), not unsaved form edits - save first, then test,
+        // same as every other setting on this page.
+        adapter.on('message', async obj => {
+            if (obj.command === 'testDatabaseConnection') {
+                try {
+                    await checkDatabaseConnection();
+                    const connState = await adapter.getStateAsync('Database.connected');
+                    const msgState = await adapter.getStateAsync('Database.lastCheckMessage');
+                    if (obj.callback) {
+                        adapter.sendTo(
+                            obj.from,
+                            obj.command,
+                            { connected: connState ? connState.val : false, message: msgState ? msgState.val : '' },
+                            obj.callback,
+                        );
+                    }
+                } catch (e) {
+                    if (obj.callback) {
+                        adapter.sendTo(obj.from, obj.command, { connected: false, message: e.message }, obj.callback);
+                    }
+                }
+            } else if (obj.command === 'testEmail') {
+                try {
+                    if (!adapter.config.reportRecipient) {
+                        throw new Error('No recipient e-mail address configured.');
+                    }
+                    await adapter.sendToAsync(getEmailInstance(), 'send', {
+                        to: adapter.config.reportRecipient,
+                        subject: 'ioBroker.solarlog test e-mail',
+                        text: `This is a test e-mail from the solarlog adapter's Billing settings, sent via instance "${getEmailInstance()}".`,
+                    });
+                    if (obj.callback) {
+                        adapter.sendTo(
+                            obj.from,
+                            obj.command,
+                            {
+                                ok: true,
+                                message: `Sent via ${getEmailInstance()} to ${adapter.config.reportRecipient}.`,
+                            },
+                            obj.callback,
+                        );
+                    }
+                } catch (e) {
+                    if (obj.callback) {
+                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
+                    }
+                }
             }
         });
     } catch (e) {
@@ -1076,6 +1130,15 @@ async function regenerateCurrentReport() {
 } // END regenerateCurrentReport
 
 /**
+ * Which ioBroker.email instance to send through - configurable (Billing tab), since a
+ * host can run several email instances or name theirs differently. Defaults to the
+ * conventional "email.0" if left blank.
+ */
+function getEmailInstance() {
+    return (adapter.config.emailInstance || 'email.0').trim();
+} // END getEmailInstance
+
+/**
  * Builds and sends the scheduled monthly/quarterly/yearly report by email, per
  * lib/scheduling.js's decision. The file is written to the adapter's own file storage
  * FIRST, before attempting to send - so a working copy exists under export/sent/ even
@@ -1101,7 +1164,7 @@ async function sendScheduledReport(period) {
         adapter.log.info(`Scheduled report for ${period.label} saved: ${fileName}`);
 
         if (adapter.config.reportRecipient) {
-            await adapter.sendToAsync('email.0', 'send', {
+            await adapter.sendToAsync(getEmailInstance(), 'send', {
                 to: adapter.config.reportRecipient,
                 subject: `Solar-Abrechnung ${period.label}`,
                 text: `Im Anhang die Abrechnung für ${period.label} (${period.fromDate} bis ${period.toDate}).`,
@@ -1113,7 +1176,9 @@ async function sendScheduledReport(period) {
                     },
                 ],
             });
-            adapter.log.info(`Scheduled report for ${period.label} sent to ${adapter.config.reportRecipient}.`);
+            adapter.log.info(
+                `Scheduled report for ${period.label} sent to ${adapter.config.reportRecipient} via ${getEmailInstance()}.`,
+            );
         } else {
             adapter.log.warn(`Scheduled report for ${period.label} saved but not sent: no recipient configured.`);
         }

@@ -366,16 +366,27 @@ systemDictionary = {
     "es": "contraseña de instalador",
     "pl": "hasło instalatora"
   },
+  "backup": {
+    "en": "Backup",
+    "de": "Backup",
+    "ru": "Backup",
+    "pt": "Backup",
+    "nl": "Back-up",
+    "fr": "Sauvegarde",
+    "it": "Backup",
+    "es": "Copia de seguridad",
+    "pl": "Kopia zapasowa"
+  },
   "backupAuto": {
-    "en": "automatic weekly backup (Sunday, 03:00)",
-    "de": "automatische wöchentliche Sicherung (Sonntag, 03:00 Uhr)",
-    "ru": "автоматическое еженедельное резервное копирование (воскресенье, 03:00)",
-    "pt": "backup semanal automático (domingo, 03:00)",
-    "nl": "automatische wekelijkse back-up (zondag, 03:00)",
-    "fr": "sauvegarde hebdomadaire automatique (dimanche, 3h00)",
-    "it": "backup settimanale automatico (domenica, 03:00)",
-    "es": "copia de seguridad semanal automática (domingo, 03:00)",
-    "pl": "automatyczna cotygodniowa kopia zapasowa (niedziela, 03:00)"
+    "en": "automatic weekly backup",
+    "de": "automatische wöchentliche Sicherung",
+    "ru": "автоматическое еженедельное резервное копирование",
+    "pt": "backup semanal automático",
+    "nl": "automatische wekelijkse back-up",
+    "fr": "sauvegarde hebdomadaire automatique",
+    "it": "backup settimanale automatico",
+    "es": "copia de seguridad semanal automática",
+    "pl": "automatyczna cotygodniowa kopia zapasowa"
   },
   "backupKeep": {
     "en": "number of backups to keep",
@@ -387,6 +398,105 @@ systemDictionary = {
     "it": "numero di backup da conservare",
     "es": "número de copias de seguridad a conservar",
     "pl": "liczba przechowywanych kopii zapasowych"
+  },
+  "backupWeekday": {
+    "en": "Backup weekday",
+    "de": "Sicherungs-Wochentag",
+    "ru": "Backup weekday",
+    "pt": "Backup weekday",
+    "nl": "Backup weekday",
+    "fr": "Backup weekday",
+    "it": "Backup weekday",
+    "es": "Backup weekday",
+    "pl": "Backup weekday"
+  },
+  "backupHour": {
+    "en": "Backup hour (0-23)",
+    "de": "Sicherungs-Stunde (0-23)",
+    "ru": "Backup hour (0-23)",
+    "pt": "Backup hour (0-23)",
+    "nl": "Backup hour (0-23)",
+    "fr": "Backup hour (0-23)",
+    "it": "Backup hour (0-23)",
+    "es": "Backup hour (0-23)",
+    "pl": "Backup hour (0-23)"
+  },
+  "weekdaySunday": {
+    "en": "Sunday",
+    "de": "Sonntag",
+    "ru": "Sunday",
+    "pt": "Sunday",
+    "nl": "Sunday",
+    "fr": "Sunday",
+    "it": "Sunday",
+    "es": "Sunday",
+    "pl": "Sunday"
+  },
+  "weekdayMonday": {
+    "en": "Monday",
+    "de": "Montag",
+    "ru": "Monday",
+    "pt": "Monday",
+    "nl": "Monday",
+    "fr": "Monday",
+    "it": "Monday",
+    "es": "Monday",
+    "pl": "Monday"
+  },
+  "weekdayTuesday": {
+    "en": "Tuesday",
+    "de": "Dienstag",
+    "ru": "Tuesday",
+    "pt": "Tuesday",
+    "nl": "Tuesday",
+    "fr": "Tuesday",
+    "it": "Tuesday",
+    "es": "Tuesday",
+    "pl": "Tuesday"
+  },
+  "weekdayWednesday": {
+    "en": "Wednesday",
+    "de": "Mittwoch",
+    "ru": "Wednesday",
+    "pt": "Wednesday",
+    "nl": "Wednesday",
+    "fr": "Wednesday",
+    "it": "Wednesday",
+    "es": "Wednesday",
+    "pl": "Wednesday"
+  },
+  "weekdayThursday": {
+    "en": "Thursday",
+    "de": "Donnerstag",
+    "ru": "Thursday",
+    "pt": "Thursday",
+    "nl": "Thursday",
+    "fr": "Thursday",
+    "it": "Thursday",
+    "es": "Thursday",
+    "pl": "Thursday"
+  },
+  "weekdayFriday": {
+    "en": "Friday",
+    "de": "Freitag",
+    "ru": "Friday",
+    "pt": "Friday",
+    "nl": "Friday",
+    "fr": "Friday",
+    "it": "Friday",
+    "es": "Friday",
+    "pl": "Friday"
+  },
+  "weekdaySaturday": {
+    "en": "Saturday",
+    "de": "Samstag",
+    "ru": "Saturday",
+    "pt": "Saturday",
+    "nl": "Saturday",
+    "fr": "Saturday",
+    "it": "Saturday",
+    "es": "Saturday",
+    "pl": "Saturday"
   },
   "backupHint": {
     "en": "Backups require installer login (see above) and can also be triggered manually via the 'Backup.trigger' state. Files are stored in the adapter's file storage and can be downloaded from there.",
@@ -587,14 +697,69 @@ systemDictionary = {
     "pl": "Yearly"
   },
   "reportCutoffDay": {
-    "en": "Cutoff day (1-28)",
-    "de": "Stichtag (1-28)",
-    "ru": "Cutoff day (1-28)",
-    "pt": "Cutoff day (1-28)",
-    "nl": "Cutoff day (1-28)",
-    "fr": "Cutoff day (1-28)",
-    "it": "Cutoff day (1-28)",
-    "es": "Cutoff day (1-28)",
-    "pl": "Cutoff day (1-28)"
+    "en": "Cutoff day (1-31, 31 = last day of the month)",
+    "de": "Stichtag (1-31, 31 = letzter Tag des Monats)",
+    "ru": "Cutoff day (1-31, 31 = last day of the month)",
+    "pt": "Cutoff day (1-31, 31 = last day of the month)",
+    "nl": "Cutoff day (1-31, 31 = last day of the month)",
+    "fr": "Cutoff day (1-31, 31 = last day of the month)",
+    "it": "Cutoff day (1-31, 31 = last day of the month)",
+    "es": "Cutoff day (1-31, 31 = last day of the month)",
+    "pl": "Cutoff day (1-31, 31 = last day of the month)"
+  },
+  "emailInstance": {
+    "en": "E-mail instance",
+    "de": "E-Mail-Instanz",
+    "ru": "E-mail instance",
+    "pt": "E-mail instance",
+    "nl": "E-mail instance",
+    "fr": "E-mail instance",
+    "it": "E-mail instance",
+    "es": "E-mail instance",
+    "pl": "E-mail instance"
+  },
+  "testConnectionButton": {
+    "en": "Test connection",
+    "de": "Verbindung testen",
+    "ru": "Test connection",
+    "pt": "Test connection",
+    "nl": "Test connection",
+    "fr": "Test connection",
+    "it": "Test connection",
+    "es": "Test connection",
+    "pl": "Test connection"
+  },
+  "testEmailButton": {
+    "en": "Send test e-mail",
+    "de": "Test-E-Mail senden",
+    "ru": "Send test e-mail",
+    "pt": "Send test e-mail",
+    "nl": "Send test e-mail",
+    "fr": "Send test e-mail",
+    "it": "Send test e-mail",
+    "es": "Send test e-mail",
+    "pl": "Send test e-mail"
+  },
+  "invalidValue": {
+    "en": "invalid value",
+    "de": "ungültiger Wert",
+    "ru": "invalid value",
+    "pt": "invalid value",
+    "nl": "invalid value",
+    "fr": "invalid value",
+    "it": "invalid value",
+    "es": "invalid value",
+    "pl": "invalid value"
+  },
+  "reportRecipientMissingWarning": {
+    "en": "E-mail report is enabled but no recipient address is set - no report will be sent until you fill this in.",
+    "de": "E-Mail-Report ist aktiviert, aber keine Empfänger-Adresse eingetragen - es wird kein Report verschickt, bis das nachgeholt wird.",
+    "ru": "E-mail report is enabled but no recipient address is set.",
+    "pt": "E-mail report is enabled but no recipient address is set.",
+    "nl": "E-mail report is enabled but no recipient address is set.",
+    "fr": "E-mail report is enabled but no recipient address is set.",
+    "it": "E-mail report is enabled but no recipient address is set.",
+    "es": "E-mail report is enabled but no recipient address is set.",
+    "pl": "E-mail report is enabled but no recipient address is set."
   }
 }

@@ -46,4 +46,31 @@ describe('determineScheduledPeriod', () => {
             expect(result).to.deep.equal({ fromDate: '2025-01-01', toDate: '2025-12-31', label: '2025' });
         });
     });
+
+    describe('cutoffDay 31 ("last day of the month")', () => {
+        it('fires on the 31st in a 31-day month', () => {
+            const result = determineScheduledPeriod(new Date(2026, 7, 31), 'monthly', 31); // Aug 31
+            expect(result).to.not.equal(null);
+        });
+
+        it('fires on the 30th in a 30-day month (clamped, not skipped)', () => {
+            const result = determineScheduledPeriod(new Date(2026, 8, 30), 'monthly', 31); // Sep 30
+            expect(result).to.not.equal(null);
+        });
+
+        it('fires on the 28th in February of a non-leap year (clamped)', () => {
+            const result = determineScheduledPeriod(new Date(2026, 1, 28), 'monthly', 31); // Feb 28, 2026 (not a leap year)
+            expect(result).to.not.equal(null);
+        });
+
+        it('fires on the 29th in February of a leap year (clamped)', () => {
+            const result = determineScheduledPeriod(new Date(2028, 1, 29), 'monthly', 31); // Feb 29, 2028 (leap year)
+            expect(result).to.not.equal(null);
+        });
+
+        it('does not fire twice in the same month (e.g. not also on the 30th when clamped to 28)', () => {
+            expect(determineScheduledPeriod(new Date(2026, 1, 27), 'monthly', 31)).to.equal(null);
+            expect(determineScheduledPeriod(new Date(2026, 2, 1), 'monthly', 31)).to.equal(null);
+        });
+    });
 });

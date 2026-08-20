@@ -49,6 +49,37 @@
       } else {
         $('#_reportConn').hide();
       }
+      if ($('#reportEnabled').prop('checked') && !$('#reportRecipient').val()) {
+        $('#_reportRecipientWarning').show();
+      } else {
+        $('#_reportRecipientWarning').hide();
+      }
+    }
+
+    function validateSettings() {
+      var errors = [];
+      if ($('#mariadbEnabled').prop('checked')) {
+        var hostField = document.getElementById('mariadbHost');
+        var portField = document.getElementById('mariadbPort');
+        if (!hostField.value || !hostField.checkValidity()) {
+          errors.push(translateWord('mariadbHost') + ': ' + translateWord('invalidValue'));
+        }
+        if (!portField.value || !portField.checkValidity()) {
+          errors.push(translateWord('mariadbPort') + ': ' + translateWord('invalidValue'));
+        }
+      }
+      if ($('#backupAuto').prop('checked') && (parseInt($('#backupKeep').val(), 10) || 0) < 1) {
+        errors.push(translateWord('backupKeep') + ': ' + translateWord('invalidValue'));
+      }
+      var hourField = document.getElementById('backupHour');
+      if ($('#backupAuto').prop('checked') && (!hourField.value || !hourField.checkValidity())) {
+        errors.push(translateWord('backupHour') + ': ' + translateWord('invalidValue'));
+      }
+      return errors;
+    }
+
+    function translateWord(key) {
+      return (typeof systemDictionary !== 'undefined' && systemDictionary[key] && systemDictionary[key][systemLang]) || key;
     }
 
     // the function loadSettings has to exist ...
@@ -85,6 +116,37 @@
       $('#reportEnabled').on('change', function() {
         onShow();
       });
+      $('#reportRecipient').on('keyup change', function() {
+        onShow();
+      });
+      $('#mariadbHost, #mariadbPort').on('keyup change', function() {
+        this.classList.toggle('invalid', !!this.value && !this.checkValidity());
+      });
+      $('#backupKeep').on('keyup change', function() {
+        var enabled = $('#backupAuto').prop('checked');
+        this.classList.toggle('invalid', enabled && (parseInt(this.value, 10) || 0) < 1);
+      });
+      $('#backupAuto').on('change', function() {
+        $('#backupKeep').trigger('change');
+      });
+
+      $('#testDbConnectionButton').on('click', function() {
+        $('#testDbConnectionResult').text('...');
+        sendTo(null, 'testDatabaseConnection', {}, function(result) {
+          $('#testDbConnectionResult')
+            .text((result && result.message) || '')
+            .css('color', result && result.connected ? 'green' : 'red');
+        });
+      });
+      $('#testEmailButton').on('click', function() {
+        $('#testEmailResult').text('...');
+        sendTo(null, 'testEmail', {}, function(result) {
+          $('#testEmailResult')
+            .text((result && result.message) || '')
+            .css('color', result && result.ok ? 'green' : 'red');
+        });
+      });
+
       onShow();
 
       onChange(false);
@@ -94,6 +156,11 @@
     // ... and the function save has to exist.
     // you have to make sure the callback is called with the settings object as first param!
     function save(callback) {
+      var errors = validateSettings();
+      if (errors.length) {
+        alert(errors.join('\n'));
+        return;
+      }
       // example: select elements with class=value and build settings object
       var obj = {};
       $('.value').each(function() {
@@ -197,7 +264,7 @@
         </div>
         <div class="row">
           <div class="input-field col s12 m6 l4">
-            <input type="number" class="value" id="pollIntervalperiodic" min="5" />
+            <input type="number" class="value" id="pollIntervalperiodic" min="10" />
             <label for="pollIntervalperiodic" class="translate">pollIntervalperiodic</label>
             <!-- Important: label must come directly after input. Label is important. -->
             <span class="translate">pollIntervalperiodic</span>
@@ -235,6 +302,25 @@
             <input type="number" class="value" id="backupKeep" min="1" max="50" />
             <label for="backupKeep" class="translate">backupKeep</label>
             <span class="translate">backupKeep</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <select class="value" id="backupWeekday">
+              <option value="0" class="translate">weekdaySunday</option>
+              <option value="1" class="translate">weekdayMonday</option>
+              <option value="2" class="translate">weekdayTuesday</option>
+              <option value="3" class="translate">weekdayWednesday</option>
+              <option value="4" class="translate">weekdayThursday</option>
+              <option value="5" class="translate">weekdayFriday</option>
+              <option value="6" class="translate">weekdaySaturday</option>
+            </select>
+            <label for="backupWeekday" class="translate">backupWeekday</label>
+          </div>
+          <div class="input-field col s12 m6 l4">
+            <input type="number" class="value" id="backupHour" min="0" max="23" />
+            <label for="backupHour" class="translate">backupHour</label>
+            <span class="translate">backupHour</span>
           </div>
         </div>
         <div class="row">
@@ -291,12 +377,13 @@
         <div id="_mariadbConn">
           <div class="row">
             <div class="input-field col s12 m6 l4">
-              <input class="value" id="mariadbHost" type="text" />
+              <input class="value" id="mariadbHost" type="text" maxlength="253"
+                pattern="^((\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)$" />
               <label for="mariadbHost" class="translate">mariadbHost</label>
               <span class="translate">mariadbHost</span>
             </div>
             <div class="input-field col s12 m6 l2">
-              <input class="value" id="mariadbPort" type="number" />
+              <input class="value" id="mariadbPort" type="number" min="1" max="65535" />
               <label for="mariadbPort" class="translate">mariadbPort</label>
               <span class="translate">mariadbPort</span>
             </div>
@@ -316,6 +403,12 @@
               <input class="value" id="mariadbPassword" type="password" autocomplete="new-password" />
               <label for="mariadbPassword" class="translate">mariadbPassword</label>
               <span class="translate">mariadbPassword</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12 m6 l4">
+              <a id="testDbConnectionButton" class="waves-effect waves-light btn translate">testConnectionButton</a>
+              <span id="testDbConnectionResult" style="margin-left: 12px;"></span>
             </div>
           </div>
         </div>
@@ -339,6 +432,16 @@
               <label for="reportRecipient" class="translate">reportRecipient</label>
               <span class="translate">reportRecipient</span>
             </div>
+            <div class="input-field col s12 m6 l4">
+              <input class="value" id="emailInstance" type="text" />
+              <label for="emailInstance" class="translate">emailInstance</label>
+              <span class="translate">emailInstance</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span id="_reportRecipientWarning" class="translate red-text" style="display: none;">reportRecipientMissingWarning</span>
+            </div>
           </div>
           <div class="row">
             <div class="input-field col s12 m6 l4">
@@ -350,9 +453,15 @@
               <label for="reportSchedule" class="translate">reportSchedule</label>
             </div>
             <div class="input-field col s12 m6 l4">
-              <input class="value" id="reportCutoffDay" type="number" min="1" max="28" />
+              <input class="value" id="reportCutoffDay" type="number" min="1" max="31" />
               <label for="reportCutoffDay" class="translate">reportCutoffDay</label>
               <span class="translate">reportCutoffDay</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12 m6 l4">
+              <a id="testEmailButton" class="waves-effect waves-light btn translate">testEmailButton</a>
+              <span id="testEmailResult" style="margin-left: 12px;"></span>
             </div>
           </div>
         </div>
