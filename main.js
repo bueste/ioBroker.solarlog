@@ -220,6 +220,9 @@ async function main() {
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
         await ensureDatabaseObjects();
+        await ensureExportObjects();
+        await ensureTariffDefaultObjects();
+        await cleanupLegacyTariffObjects();
         await ensureMariaDbPool();
         await checkDatabaseConnection();
 
@@ -420,6 +423,32 @@ async function main() {
                 } catch (e) {
                     if (obj.callback) {
                         adapter.sendTo(obj.from, obj.command, { connected: false, message: e.message }, obj.callback);
+                    }
+                }
+            } else if (obj.command === 'generateReport') {
+                try {
+                    const fileName = await regenerateCurrentReport();
+                    if (!fileName) {
+                        throw new Error(
+                            'MariaDB is not enabled/connected - see instance configuration and Database.lastCheckMessage.',
+                        );
+                    }
+                    if (obj.callback) {
+                        adapter.sendTo(
+                            obj.from,
+                            obj.command,
+                            {
+                                ok: true,
+                                fileName,
+                                url: `/files/${adapter.namespace}/${fileName}`,
+                                message: `Generated: ${fileName}`,
+                            },
+                            obj.callback,
+                        );
+                    }
+                } catch (e) {
+                    if (obj.callback) {
+                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
                     }
                 }
             } else if (obj.command === 'testEmail') {
@@ -987,6 +1016,40 @@ async function ensureDatabaseObjects() {
     });
 } // END ensureDatabaseObjects
 
+async function ensureExportObjects() {
+    // Same instanceObjects-sync caveat as ensureFeedinDayObject()/ensureDatabaseObjects()
+    // above - but this one also had actual stale content: an earlier version's CSV-era
+    // name/description survived multiple redeploys on production because nothing ever
+    // called extendObjectAsync to overwrite it (setObjectNotExistsAsync only creates,
+    // never corrects, an object that already exists).
+    await adapter.extendObjectAsync('Export', { type: 'channel', common: { name: 'Export' }, native: {} });
+    await adapter.extendObjectAsync('Export.triggerMeterReadings', {
+        type: 'state',
+        common: {
+            name: 'Generate current-period billing report (XLSX)',
+            type: 'boolean',
+            role: 'button',
+            read: false,
+            write: true,
+            def: false,
+            desc: 'Set to true to regenerate the month-to-date billing report from MariaDB as an .xlsx file, downloadable via Export.lastFile',
+        },
+        native: {},
+    });
+    await adapter.extendObjectAsync('Export.lastFile', {
+        type: 'state',
+        common: {
+            name: 'Last export file',
+            type: 'string',
+            role: 'text',
+            read: true,
+            write: false,
+            desc: "Path of the last XLSX export within this adapter's file storage - open it via the Files tab in the ioBroker Admin object tree, or download it directly at http://<this host>:8081/files/solarlog.0/<this path>",
+        },
+        native: {},
+    });
+} // END ensureExportObjects
+
 async function ensureDailySplitStates(name) {
     await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugday`, {
         type: 'state',
@@ -1033,10 +1096,29 @@ function isBillableMeter(name) {
 const DEFAULT_TARIFF_NETZBEZUG = 0.28;
 const DEFAULT_TARIFF_SOLARBEZUG = 0.2;
 
+/**
+ * Creates (or corrects, on redeploy - extendObjectAsync overwrites common metadata even
+ * if the object already exists, unlike setObjectNotExistsAsync) the given state object,
+ * and - separately, since common.def is only metadata and is never auto-written into the
+ * actual state value by ioBroker - seeds the real state with that default the first time,
+ * so the object tree shows a real number instead of "(null)" until the landlord edits it.
+ *
+ * @param {string} id
+ * @param {object} commonDef
+ * @param {number} defaultValue
+ */
+async function ensureValueState(id, commonDef, defaultValue) {
+    await adapter.extendObjectAsync(id, { type: 'state', common: commonDef, native: {} });
+    const state = await adapter.getStateAsync(id);
+    if (!state || state.val === null || state.val === undefined) {
+        await adapter.setStateAsync(id, defaultValue, true);
+    }
+} // END ensureValueState
+
 async function ensureMonthlyTariffState(year, month) {
-    await adapter.setObjectNotExistsAsync(`Tarif.${year}.${month}.netzbezug`, {
-        type: 'state',
-        common: {
+    await ensureValueState(
+        `Tarif.${year}.${month}.netzbezug`,
+        {
             name: `Netzbezugspreis ${month}/${year}`,
             type: 'number',
             role: 'value',
@@ -1044,13 +1126,13 @@ async function ensureMonthlyTariffState(year, month) {
             write: true,
             def: DEFAULT_TARIFF_NETZBEZUG,
             unit: 'CHF/kWh',
-            desc: `Grid tariff for ${month}/${year} (EXAMPLE default, verify actual rate), falls back to Tarif.default.netzbezug when unset`,
+            desc: `All-in grid draw price for ${month}/${year} incl. Netznutzung/grid fees and taxes (EXAMPLE default, verify actual rate), falls back to Tarif.default.netzbezug when unset`,
         },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync(`Tarif.${year}.${month}.solarbezug`, {
-        type: 'state',
-        common: {
+        DEFAULT_TARIFF_NETZBEZUG,
+    );
+    await ensureValueState(
+        `Tarif.${year}.${month}.solarbezug`,
+        {
             name: `Solarbezugspreis ${month}/${year}`,
             type: 'number',
             role: 'value',
@@ -1060,9 +1142,60 @@ async function ensureMonthlyTariffState(year, month) {
             unit: 'CHF/kWh',
             desc: `Self-consumption (PV) tariff for ${month}/${year} (EXAMPLE default, verify actual rate), falls back to Tarif.default.solarbezug when unset`,
         },
-        native: {},
-    });
+        DEFAULT_TARIFF_SOLARBEZUG,
+    );
 } // END ensureMonthlyTariffState
+
+async function ensureTariffDefaultObjects() {
+    await ensureValueState(
+        'Tarif.default.netzbezug',
+        {
+            name: 'Default Netzbezugspreis',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: true,
+            def: DEFAULT_TARIFF_NETZBEZUG,
+            unit: 'CHF/kWh',
+            desc: 'Grid tariff (incl. Netznutzung/grid fees and taxes) used for any month without its own Tarif.<year>.<month>.netzbezug override (EXAMPLE default, verify actual rate)',
+        },
+        DEFAULT_TARIFF_NETZBEZUG,
+    );
+    await ensureValueState(
+        'Tarif.default.solarbezug',
+        {
+            name: 'Default Solarbezugspreis',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: true,
+            def: DEFAULT_TARIFF_SOLARBEZUG,
+            unit: 'CHF/kWh',
+            desc: 'Self-consumption (PV) tariff used for any month without its own Tarif.<year>.<month>.solarbezug override (EXAMPLE default, verify actual rate)',
+        },
+        DEFAULT_TARIFF_SOLARBEZUG,
+    );
+} // END ensureTariffDefaultObjects
+
+/**
+ * Deletes leftover flat Tarif.<year>.<month> objects from the single-pauschal-tariff
+ * schema that predates the Solarbezug/Netzbezug split. They hold no state value (dead
+ * weight) and are superseded by the Tarif.<year>.<month>.netzbezug/solarbezug pair -
+ * left in place they confuse the object tree (a "01" leaf sitting next to a "08" folder).
+ */
+async function cleanupLegacyTariffObjects() {
+    try {
+        const objects = await adapter.getForeignObjectsAsync(`${adapter.namespace}.Tarif.*`, 'state');
+        for (const id of Object.keys(objects)) {
+            if (/\.Tarif\.\d{4}\.\d{2}$/.test(id)) {
+                await adapter.delObjectAsync(id.slice(adapter.namespace.length + 1));
+                adapter.log.info(`Removed legacy single-tariff object ${id} (superseded by .netzbezug/.solarbezug)`);
+            }
+        }
+    } catch (e) {
+        adapter.log.warn(`cleanupLegacyTariffObjects - Error: ${e.message}`);
+    }
+} // END cleanupLegacyTariffObjects
 
 async function ensureAllMonthlyTariffsUntil(untilYear) {
     // Pre-create every month from the current one through December of untilYear, so
@@ -1110,10 +1243,14 @@ async function getTariffsForMonth(year, month) {
  * makes it available for manual download via Export.lastFile - runs both nightly (after
  * the day's MariaDB write) and on-demand (Export.triggerMeterReadings).
  */
+/**
+ * @returns {Promise<string|null>} the adapter-relative file path of the generated report
+ *   (e.g. "export/abrechnung_manuell_2026-08.xlsx"), or null if it could not be generated.
+ */
 async function regenerateCurrentReport() {
     if (!mariadbPool) {
         adapter.log.warn('Cannot generate report: MariaDB is not enabled/connected (see instance configuration).');
-        return;
+        return null;
     }
     try {
         const now = new Date();
@@ -1132,8 +1269,10 @@ async function regenerateCurrentReport() {
         await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
         await adapter.setStateAsync('Export.lastFile', fileName, true);
         adapter.log.info(`Regenerated current-period report: ${fileName} (${meterRows.length} meter rows)`);
+        return fileName;
     } catch (e) {
         adapter.log.warn(`regenerateCurrentReport - Error: ${e.message}`);
+        return null;
     }
 } // END regenerateCurrentReport
 

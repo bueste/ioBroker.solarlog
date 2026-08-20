@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.3",
+    "version": "2.5.4",
     "news": {
+      "2.5.4": {
+        "en": "Fix: monthly/default Netzbezugspreis and Solarbezugspreis states showed \"(null)\" in the object tree - common.def was set but never actually written into the state, and it's now seeded on first creation (billing math itself was unaffected, it already fell back to the same defaults in code). Fix: Export.triggerMeterReadings/Export.lastFile kept showing stale pre-XLSX \"CSV\" wording on production because nothing ever pushed the corrected io-package.json text into the already-existing objects - now corrected on every startup. New: a \"Generate current-period report now\" button on the Billing settings page with a direct download link, so you don't have to dig through the object tree to trigger and fetch a report. Cleanup: removed leftover single-value Tarif.<year>.<month> objects from the pre-split tariff schema (they held no data and only confused the object tree).",
+        "de": "Fix: Die monatlichen/Standard-Netzbezugspreis- und Solarbezugspreis-Zustände zeigten \"(null)\" im Objektbaum - common.def war gesetzt, wurde aber nie tatsächlich in den Zustand geschrieben; das passiert jetzt bei der ersten Erstellung (die eigentliche Abrechnungsberechnung war davon nicht betroffen, sie griff im Code bereits auf dieselben Standardwerte zurück). Fix: Export.triggerMeterReadings/Export.lastFile zeigten auf der Produktivinstanz weiterhin den veralteten Vor-XLSX-Text \"CSV\", weil nichts den korrigierten io-package.json-Text in die bereits existierenden Objekte übertragen hat - das wird jetzt bei jedem Start korrigiert. Neu: ein \"Aktuellen Bericht jetzt erzeugen\"-Button auf der Billing-Seite mit direktem Download-Link, damit man nicht mehr im Objektbaum danach suchen muss. Aufräumen: veraltete einwertige Tarif.<Jahr>.<Monat>-Objekte aus dem Vor-Split-Tarifschema entfernt (sie enthielten keine Daten und verwirrten nur den Objektbaum).",
+        "ru": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "pt": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "nl": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "fr": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "it": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "es": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link.",
+        "pl": "Fix: tariff states showed (null) instead of the default value. Fix: stale CSV wording on Export objects corrected. New: \"Generate report now\" button with download link."
+      },
       "2.5.3": {
         "en": "Fix: the MariaDB host field's validation pattern was too loose and accepted any bare word (e.g. \"bullshit\") as a syntactically \"valid\" single-label hostname - it now requires a real dotted IPv4 address (with correct 0-255 octet ranges) or a proper FQDN with at least one dot. Fix: the recipient e-mail field accepted any text, not just e-mail addresses - it's now a real e-mail-typed field, validated both in the admin UI and again server-side before sending. Fix: the configured e-mail instance was never checked for existence - sendTo() to a typo'd or removed instance (e.g. \"email.5\") silently did nothing; both \"Send test e-mail\" and the unattended scheduled report job now check the instance exists and is running first, and report a clear error if not.",
         "de": "Fix: Das Prüfmuster des MariaDB-Host-Felds war zu locker und akzeptierte jedes beliebige Wort (z.B. \"bullshit\") als syntaktisch \"gültigen\" einteiligen Hostnamen - jetzt wird eine echte IPv4-Adresse mit Punkten (mit korrekten 0-255 Oktett-Bereichen) oder ein richtiger FQDN mit mindestens einem Punkt verlangt. Fix: Das Empfänger-E-Mail-Feld akzeptierte beliebigen Text, nicht nur E-Mail-Adressen - es ist jetzt ein echtes E-Mail-Feld, geprüft sowohl im Admin-UI als auch nochmals server-seitig vor dem Versand. Fix: Die konfigurierte E-Mail-Instanz wurde nie auf Existenz geprüft - sendTo() an eine verschriebene oder entfernte Instanz (z.B. \"email.5\") tat klaglos nichts; sowohl \"Test-E-Mail senden\" als auch der automatische Report-Versand prüfen jetzt zuerst, ob die Instanz existiert und läuft, und melden andernfalls einen klaren Fehler.",
@@ -832,7 +843,7 @@
         "role": "text",
         "read": true,
         "write": false,
-        "desc": "File name of the last XLSX export, downloadable via the adapter's file storage"
+        "desc": "Path of the last XLSX export within this adapter's file storage - open it via the Files tab in the ioBroker Admin object tree, or download it directly at http://<this host>:8081/files/solarlog.0/<this path>"
       },
       "native": {}
     },

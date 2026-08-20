@@ -718,6 +718,17 @@ systemDictionary = {
     "es": "E-mail instance",
     "pl": "E-mail instance"
   },
+  "generateReportButton": {
+    "en": "Generate current-period report now (XLSX)",
+    "de": "Aktuellen Bericht jetzt erzeugen (XLSX)",
+    "ru": "Generate current-period report now (XLSX)",
+    "pt": "Generate current-period report now (XLSX)",
+    "nl": "Generate current-period report now (XLSX)",
+    "fr": "Generate current-period report now (XLSX)",
+    "it": "Generate current-period report now (XLSX)",
+    "es": "Generate current-period report now (XLSX)",
+    "pl": "Generate current-period report now (XLSX)"
+  },
   "testConnectionButton": {
     "en": "Test connection",
     "de": "Verbindung testen",

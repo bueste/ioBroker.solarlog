@@ -146,6 +146,21 @@
             .css('color', result && result.connected ? 'green' : 'red');
         });
       });
+      $('#generateReportButton').on('click', function() {
+        $('#generateReportResult').text('...');
+        sendTo(null, 'generateReport', {}, function(result) {
+          if (result && result.ok && result.url) {
+            $('#generateReportResult')
+              .empty()
+              .append($('<a target="_blank" rel="noopener"></a>').attr('href', result.url).text(result.fileName))
+              .css('color', 'green');
+          } else {
+            $('#generateReportResult')
+              .text((result && result.message) || '')
+              .css('color', 'red');
+          }
+        });
+      });
       $('#testEmailButton').on('click', function() {
         $('#testEmailResult').text('...');
         sendTo(null, 'testEmail', {}, function(result) {
@@ -417,6 +432,12 @@
             <div class="col s12 m6 l4">
               <a id="testDbConnectionButton" class="waves-effect waves-light btn translate">testConnectionButton</a>
               <span id="testDbConnectionResult" style="margin-left: 12px;"></span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <a id="generateReportButton" class="waves-effect waves-light btn translate">generateReportButton</a>
+              <span id="generateReportResult" style="margin-left: 12px;"></span>
             </div>
           </div>
         </div>
