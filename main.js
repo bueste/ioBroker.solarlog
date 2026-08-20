@@ -329,6 +329,7 @@ async function main() {
 
         if (uzimp) {
             jedeNacht = schedule.scheduleJob('58 23 * * *', async () => accumulateMonthlyPerDevice());
+            await ensureAllMonthlyTariffsUntil(2035);
         }
 
         if (backupAuto) {
@@ -506,51 +507,89 @@ async function pruneOldBackups() {
     }
 } // END pruneOldBackups
 
+async function ensureArchiveState(id, name, desc) {
+    await adapter.setObjectNotExistsAsync(id, {
+        type: 'state',
+        common: { name, desc, type: 'number', role: 'value.monthsum', read: true, write: false, unit: 'Wh' },
+        native: {},
+    });
+} // END ensureArchiveState
+
 async function accumulateMonthlyPerDevice() {
     // Solar-Log only reports per-device totals per YEAR (code 854), not per month.
-    // We accumulate a per-device monthly running total ourselves from the daily
-    // 'daysum' values: on the 1st of the month the accumulator is reset to that
-    // day's sum (after archiving the finished month), on every other day the
-    // day's sum is added to it.
+    // We accumulate two things per device ourselves from the daily 'daysum' values:
+    //   - yieldmonth: running total for the current month, reset on the 1st
+    //   - yieldtotal: a never-resetting lifetime meter reading (Zählerstand)
+    // On the 1st, before resetting yieldmonth, the just-finished month's total AND
+    // the Zählerstand readings at its start/end are archived permanently, so the CSV
+    // export can show Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang as a
+    // control figure instead of only the pre-computed delta.
     try {
         const now = new Date();
         const isFirstOfMonth = now.getDate() === 1;
 
         for (const name of names) {
-            const id = `INV.${name}.yieldmonth`;
+            const monthId = `INV.${name}.yieldmonth`;
+            const totalId = `INV.${name}.yieldtotal`;
             const dayState = await adapter.getStateAsync(`INV.${name}.daysum`);
             if (!dayState || dayState.val === null || dayState.val === undefined) {
                 continue;
             }
             const daysum = Number(dayState.val) || 0;
 
+            const totalState = await adapter.getStateAsync(totalId);
+            let zaehlerstandVorher;
+            if (totalState && totalState.val !== null && totalState.val !== undefined) {
+                zaehlerstandVorher = Number(totalState.val);
+            } else {
+                // First time this counter is created: seed it with whatever month-to-date
+                // consumption is already tracked in yieldmonth, so it starts "caught up"
+                // instead of at 0 (which would make Zählerstand-Anfang come out negative
+                // for the very first month after this feature was introduced).
+                const monthSoFar = await adapter.getStateAsync(monthId);
+                zaehlerstandVorher = monthSoFar && monthSoFar.val ? Number(monthSoFar.val) : 0;
+            }
+            const zaehlerstandNachher = zaehlerstandVorher + daysum;
+            await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
+
             if (isFirstOfMonth) {
-                const monthState = await adapter.getStateAsync(id);
+                const monthState = await adapter.getStateAsync(monthId);
                 if (monthState && monthState.val !== null && monthState.val !== undefined) {
                     const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                     const archiveYear = prevMonth.getFullYear();
                     const archiveMonth = String(prevMonth.getMonth() + 1).padStart(2, '0');
-                    const archiveId = `Historic.${archiveYear}.monthlyINV.${archiveMonth}.${name}`;
-                    await adapter.setObjectNotExistsAsync(archiveId, {
-                        type: 'state',
-                        common: {
-                            name: 'monthsum',
-                            desc: 'Month sum Wh per device/apartment meter',
-                            type: 'number',
-                            role: 'value.monthsum',
-                            read: true,
-                            write: false,
-                            unit: 'Wh',
-                        },
-                        native: {},
-                    });
-                    await adapter.setStateAsync(archiveId, monthState.val, true);
+                    const base = `Historic.${archiveYear}.monthlyINV.${archiveMonth}.${name}`;
+
+                    await ensureArchiveState(`${base}.monthsum`, 'monthsum', 'Month sum Wh per device/apartment meter');
+                    await adapter.setStateAsync(`${base}.monthsum`, monthState.val, true);
+
+                    // Zählerstand at 00:00 on the 1st of that month = the lifetime
+                    // counter's value before this run added today's (new month's) daysum.
+                    await ensureArchiveState(
+                        `${base}.zaehlerstandStart`,
+                        'Zählerstand Monatsanfang',
+                        'Meter reading at 00:00 on the 1st of the month, Wh',
+                    );
+                    await adapter.setStateAsync(
+                        `${base}.zaehlerstandStart`,
+                        zaehlerstandVorher - Number(monthState.val),
+                        true,
+                    );
+
+                    // Zählerstand at 23:59 on the last day = the counter's value right
+                    // before today's (new month's) daysum was added.
+                    await ensureArchiveState(
+                        `${base}.zaehlerstandEnde`,
+                        'Zählerstand Monatsende',
+                        'Meter reading at 23:59 on the last day of the month, Wh',
+                    );
+                    await adapter.setStateAsync(`${base}.zaehlerstandEnde`, zaehlerstandVorher, true);
                 }
-                await adapter.setStateAsync(id, daysum, true);
+                await adapter.setStateAsync(monthId, daysum, true);
             } else {
-                const monthState = await adapter.getStateAsync(id);
+                const monthState = await adapter.getStateAsync(monthId);
                 const previous = monthState && monthState.val ? Number(monthState.val) : 0;
-                await adapter.setStateAsync(id, previous + daysum, true);
+                await adapter.setStateAsync(monthId, previous + daysum, true);
             }
         }
         adapter.log.debug('Accumulated per-device monthly totals');
@@ -566,10 +605,7 @@ function isBillableMeter(name) {
     return /^WHG \d+$/.test(name) || name === 'Allgemein';
 }
 
-async function getTariffForMonth(year, month) {
-    // Per-month tariff, editable by the landlord in the object tree. Created on first
-    // use (seeded from Tarif.default) so it shows up ready to edit for every billed month,
-    // instead of only existing for months someone happened to type in manually.
+async function ensureMonthlyTariffState(year, month) {
     const id = `Tarif.${year}.${month}`;
     await adapter.setObjectNotExistsAsync(id, {
         type: 'state',
@@ -584,37 +620,76 @@ async function getTariffForMonth(year, month) {
         },
         native: {},
     });
+} // END ensureMonthlyTariffState
+
+async function ensureAllMonthlyTariffsUntil(untilYear) {
+    // Pre-create every month from the current one through December of untilYear, so
+    // the landlord can plan/fill in tariffs years ahead rather than only ever seeing
+    // the current month.
+    const now = new Date();
+    const startYear = now.getFullYear();
+    const startMonth = now.getMonth() + 1;
+
+    for (let year = startYear; year <= untilYear; year++) {
+        const fromMonth = year === startYear ? startMonth : 1;
+        for (let m = fromMonth; m <= 12; m++) {
+            await ensureMonthlyTariffState(year, String(m).padStart(2, '0'));
+        }
+    }
+} // END ensureAllMonthlyTariffsUntil
+
+async function getTariffForMonth(year, month) {
+    // Per-month tariff, editable by the landlord in the object tree (pre-created for
+    // the whole year at adapter startup, see ensureAllMonthlyTariffsForYear). Falls
+    // back to Tarif.default only if that specific month was never filled in.
+    const id = `Tarif.${year}.${month}`;
+    await ensureMonthlyTariffState(year, month);
 
     const monthTariff = await adapter.getStateAsync(id);
     if (monthTariff && monthTariff.val !== null && monthTariff.val !== undefined && monthTariff.val !== '') {
         return Number(monthTariff.val);
     }
     const defaultTariff = await adapter.getStateAsync('Tarif.default');
-    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined ? Number(defaultTariff.val) : 0;
+    return defaultTariff && defaultTariff.val !== null && defaultTariff.val !== undefined
+        ? Number(defaultTariff.val)
+        : 0;
 } // END getTariffForMonth
 
 async function exportMeterReadings() {
     // Billing export for the property management company (Treuhänder): one row per
     // apartment/meter and month, in kWh, built from the per-device monthly archive
-    // (Historic.<year>.monthlyINV.<month>.<name>) plus the current running month, with
-    // the editable per-month tariff applied to compute the amount owed.
+    // (Historic.<year>.monthlyINV.<month>.<name>.*) plus the current running month.
+    // Includes the absolute meter readings (Zählerstand) at the start and end of the
+    // month alongside the consumption delta, purely as a control figure so the
+    // Treuhänder can verify Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang.
     try {
-        const readings = []; // { year, month, name, kwh }
+        const readings = []; // { year, month, name, kwh, zStartKwh, zEndeKwh }
 
-        const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*');
+        const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*.monthsum');
         for (const id of Object.keys(archived).sort()) {
             const state = archived[id];
             if (!state || state.val === null || state.val === undefined) {
                 continue;
             }
-            const match = id.match(/Historic\.(\d{4})\.monthlyINV\.(\d{2})\.(.+)$/);
+            const match = id.match(/Historic\.(\d{4})\.monthlyINV\.(\d{2})\.(.+)\.monthsum$/);
             if (!match) {
                 continue;
             }
             const [, year, month, name] = match;
-            if (isBillableMeter(name)) {
-                readings.push({ year, month, name, kwh: Number(state.val) / 1000 });
+            if (!isBillableMeter(name)) {
+                continue;
             }
+            const base = `Historic.${year}.monthlyINV.${month}.${name}`;
+            const startState = await adapter.getStateAsync(`${base}.zaehlerstandStart`);
+            const endeState = await adapter.getStateAsync(`${base}.zaehlerstandEnde`);
+            readings.push({
+                year,
+                month,
+                name,
+                kwh: Number(state.val) / 1000,
+                zStartKwh: startState && startState.val !== null ? Number(startState.val) / 1000 : null,
+                zEndeKwh: endeState && endeState.val !== null ? Number(endeState.val) / 1000 : null,
+            });
         }
 
         const now = new Date();
@@ -625,16 +700,45 @@ async function exportMeterReadings() {
                 continue;
             }
             const monthState = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
+            const totalState = await adapter.getStateAsync(`INV.${name}.yieldtotal`);
             if (monthState && monthState.val !== null && monthState.val !== undefined) {
-                readings.push({ year: currentYear, month: currentMonth, name, kwh: Number(monthState.val) / 1000 });
+                const zEnde = totalState && totalState.val !== null ? Number(totalState.val) : null;
+                readings.push({
+                    year: currentYear,
+                    month: currentMonth,
+                    name,
+                    kwh: Number(monthState.val) / 1000,
+                    zStartKwh: zEnde !== null ? (zEnde - Number(monthState.val)) / 1000 : null,
+                    zEndeKwh: zEnde !== null ? zEnde / 1000 : null,
+                });
             }
         }
 
-        const rows = [['Wohnung', 'Jahr', 'Monat', 'Verbrauch_kWh', 'Tarif_CHF_kWh', 'Total_CHF']];
+        const rows = [
+            [
+                'Wohnung',
+                'Jahr',
+                'Monat',
+                'Zaehlerstand Monatsanfang (0:00 Uhr) kWh',
+                'Zaehlerstand Monatsende (23:59 Uhr) kWh',
+                'Verbrauch in kWh',
+                'Tarif',
+                'Total in CHF',
+            ],
+        ];
         for (const r of readings) {
             const tariff = await getTariffForMonth(r.year, r.month);
             const total = r.kwh * tariff;
-            rows.push([r.name, r.year, r.month, r.kwh.toFixed(2), tariff.toFixed(4), total.toFixed(2)]);
+            rows.push([
+                r.name,
+                r.year,
+                r.month,
+                r.zStartKwh !== null ? r.zStartKwh.toFixed(2) : '',
+                r.zEndeKwh !== null ? r.zEndeKwh.toFixed(2) : '',
+                r.kwh.toFixed(2),
+                tariff.toFixed(4),
+                total.toFixed(2),
+            ]);
         }
 
         const csv = rows.map(row => row.join(';')).join('\n');
@@ -1985,6 +2089,20 @@ async function setInvObjects() {
                         desc: 'Monthly sum Wh (running total for the current month, adapter-side accumulation)',
                         type: 'number',
                         role: 'value.monthsum',
+                        read: true,
+                        write: false,
+                        unit: 'Wh',
+                    },
+                    native: {},
+                });
+
+                await adapter.setObjectNotExistsAsync(`INV.${names[i]}.yieldtotal`, {
+                    type: 'state',
+                    common: {
+                        name: 'Zaehlerstand',
+                        desc: 'Lifetime meter reading Wh (never resets, adapter-side accumulation since first start)',
+                        type: 'number',
+                        role: 'value.total',
                         read: true,
                         write: false,
                         unit: 'Wh',
