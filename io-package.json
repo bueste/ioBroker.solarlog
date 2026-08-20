@@ -780,13 +780,13 @@
       "_id": "Export.triggerMeterReadings",
       "type": "state",
       "common": {
-        "name": "Export meter readings as CSV",
+        "name": "Generate current-period billing report (XLSX)",
         "type": "boolean",
         "role": "button",
         "read": false,
         "write": true,
         "def": false,
-        "desc": "Set to true to export the recorded monthly/yearly meter readings as a CSV file"
+        "desc": "Set to true to regenerate the month-to-date billing report from MariaDB as an .xlsx file, downloadable via Export.lastFile"
       },
       "native": {}
     },

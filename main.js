@@ -12,6 +12,18 @@ const https = require('node:https');
 const schedule = require('node-schedule');
 const bcrypt = require('bcryptjs');
 const { selfConsumptionRatio } = require('./lib/billing');
+const mariadb = require('mariadb');
+const {
+    buildMeterDailyRow,
+    buildBuildingDailyRow,
+    ensureSchema,
+    upsertMeterDaily,
+    upsertBuildingDaily,
+    queryMeterPeriod,
+    queryBuildingPeriod,
+} = require('./lib/db');
+const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
+const { determineScheduledPeriod } = require('./lib/scheduling');
 
 let adapter;
 
@@ -95,7 +107,9 @@ let fastPolling;
 let jedeStunde;
 let jedenTag;
 let jedeNacht;
+let reportCheckJob;
 let restartTimer;
+let mariadbPool = null;
 
 let userName;
 let userPw;
@@ -122,6 +136,14 @@ function unload(callback) {
 
         jedeNacht && jedeNacht.cancel();
         jedeNacht = null;
+
+        reportCheckJob && reportCheckJob.cancel();
+        reportCheckJob = null;
+
+        if (mariadbPool) {
+            mariadbPool.end().catch(() => {});
+            mariadbPool = null;
+        }
 
         polling && clearInterval(polling);
         polling = null;
@@ -196,6 +218,7 @@ async function main() {
 
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
+        await ensureMariaDbPool();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
         numinv = 0;
@@ -333,6 +356,10 @@ async function main() {
             await ensureAllMonthlyTariffsUntil(2035);
         }
 
+        // Runs once/day, well after midnight so "today" has fully rolled over for the
+        // cutoff-day check in lib/scheduling.js.
+        reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => checkAndSendScheduledReport());
+
         if (backupAuto) {
             weeklyBackup = schedule.scheduleJob('0 3 * * 0', async () => {
                 if (await hasPlantDataChangedSinceLastBackup()) {
@@ -355,7 +382,7 @@ async function main() {
                 await runBackup();
             } else if (id === `${adapter.namespace}.Export.triggerMeterReadings`) {
                 await adapter.setStateAsync('Export.triggerMeterReadings', false, true);
-                await exportMeterReadings();
+                await regenerateCurrentReport();
             }
         });
     } catch (e) {
@@ -524,19 +551,26 @@ async function accumulateMonthlyPerDevice() {
     //   - solarbezugmonth/netzbezugmonth: today's daysum split into a solar-sourced and
     //     grid-sourced share (see selfConsumptionRatio), accumulated for the month
     // On the 1st, before resetting these, the just-finished month's totals AND the
-    // Zählerstand readings at its start/end are archived permanently, so the CSV export
+    // Zählerstand readings at its start/end are archived permanently, so the XLSX report
     // can show Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang as a control figure
-    // instead of only the pre-computed delta.
+    // instead of only the pre-computed delta. This same run also writes ONE row per
+    // billable meter to MariaDB (meter_daily) plus one building-wide row
+    // (building_daily), if MariaDB is enabled - once/day here, not on every 30s poll.
     try {
         const now = new Date();
         const isFirstOfMonth = now.getDate() === 1;
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
         const prodState = await adapter.getStateAsync('status.yieldday');
         const consState = await adapter.getStateAsync('status.consyieldday');
-        const ratio = selfConsumptionRatio(
-            prodState && prodState.val !== null ? Number(prodState.val) : 0,
-            consState && consState.val !== null ? Number(consState.val) : 0,
-        );
+        const yieldWh = prodState && prodState.val !== null ? Number(prodState.val) : 0;
+        const consWh = consState && consState.val !== null ? Number(consState.val) : 0;
+        const ratio = selfConsumptionRatio(yieldWh, consWh);
+
+        const meterDailyRows = [];
+        const dailyTariffs = mariadbPool
+            ? await getTariffsForMonth(String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'))
+            : null;
 
         for (const name of names) {
             const monthId = `INV.${name}.yieldmonth`;
@@ -564,6 +598,22 @@ async function accumulateMonthlyPerDevice() {
             }
             const zaehlerstandNachher = zaehlerstandVorher + daysum;
             await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
+
+            if (billable && mariadbPool && dailyTariffs) {
+                meterDailyRows.push(
+                    buildMeterDailyRow({
+                        date: todayStr,
+                        meterName: name,
+                        zStartKwh: zaehlerstandVorher / 1000,
+                        zEndeKwh: zaehlerstandNachher / 1000,
+                        verbrauchKwh: daysum / 1000,
+                        solarKwh: solarWh / 1000,
+                        netzKwh: netzWh / 1000,
+                        tarifNetz: dailyTariffs.netzbezug,
+                        tarifSolar: dailyTariffs.solarbezug,
+                    }),
+                );
+            }
 
             let solarMonthPrevious = 0;
             let netzMonthPrevious = 0;
@@ -643,6 +693,27 @@ async function accumulateMonthlyPerDevice() {
         adapter.log.debug(
             `Accumulated per-device monthly totals (self-consumption ratio today: ${(ratio * 100).toFixed(1)}%)`,
         );
+
+        if (mariadbPool) {
+            try {
+                await upsertMeterDaily(mariadbPool, meterDailyRows);
+                const buildingRow = buildBuildingDailyRow({
+                    date: todayStr,
+                    produktionKwh: yieldWh / 1000,
+                    verbrauchKwh: consWh / 1000,
+                    einspeisungKwh: Math.max(0, yieldWh - consWh) / 1000,
+                });
+                await upsertBuildingDaily(mariadbPool, buildingRow);
+                adapter.log.info(
+                    `MariaDB: wrote ${meterDailyRows.length} meter_daily row(s) + 1 building_daily row for ${todayStr}`,
+                );
+                await regenerateCurrentReport();
+            } catch (e) {
+                // ioBroker states above are already updated regardless - a DB hiccup only
+                // delays persistence/reporting, it never blocks the live/monthly states.
+                adapter.log.warn(`MariaDB write failed for ${todayStr} (non-fatal): ${e.message}`);
+            }
+        }
     } catch (e) {
         adapter.log.warn(`accumulateMonthlyPerDevice - Error: ${e.message}`);
     }
@@ -676,6 +747,36 @@ async function ensureBillingSplitStates(name) {
         native: {},
     });
 } // END ensureBillingSplitStates
+
+/**
+ * Connects to MariaDB and ensures the billing schema exists, if enabled in the instance
+ * configuration. Never throws - on failure, mariadbPool stays null and every dependent
+ * feature (daily DB writes, XLSX reports, scheduled emails) logs a warning and no-ops
+ * instead of crashing the adapter. The connection is retried on the next adapter restart.
+ */
+async function ensureMariaDbPool() {
+    if (!adapter.config.mariadbEnabled) {
+        adapter.log.debug('MariaDB is disabled in the instance configuration - billing DB features are inactive.');
+        return;
+    }
+    try {
+        mariadbPool = mariadb.createPool({
+            host: adapter.config.mariadbHost,
+            port: Number(adapter.config.mariadbPort) || 3306,
+            user: adapter.config.mariadbUser,
+            password: adapter.config.mariadbPassword,
+            database: adapter.config.mariadbDatabase,
+            connectionLimit: 3,
+        });
+        await ensureSchema(mariadbPool);
+        adapter.log.info(
+            'MariaDB connected, billing schema ensured (meter_daily/building_daily/meter_yearly_historic).',
+        );
+    } catch (e) {
+        adapter.log.error(`MariaDB setup failed - billing DB writes/reports disabled until next restart: ${e.message}`);
+        mariadbPool = null;
+    }
+} // END ensureMariaDbPool
 
 async function ensureFeedinDayObject() {
     // Declared in io-package.json instanceObjects too, but js-controller does not
@@ -825,116 +926,125 @@ async function getTariffsForMonth(year, month) {
     };
 } // END getTariffsForMonth
 
-async function exportMeterReadings() {
-    // Billing export for the property management company (Treuhänder): one row per
-    // apartment/meter and month, in kWh, built from the per-device monthly archive
-    // (Historic.<year>.monthlyINV.<month>.<name>.*) plus the current running month.
-    // Includes the absolute meter readings (Zählerstand) at the start and end of the
-    // month alongside the consumption delta, purely as a control figure so the
-    // Treuhänder can verify Verbrauch = Zählerstand-Ende minus Zählerstand-Anfang.
-    try {
-        const readings = []; // { year, month, name, kwh, zStartKwh, zEndeKwh, solarKwh, netzKwh }
-
-        const archived = await adapter.getStatesAsync('Historic.*.monthlyINV.*.monthsum');
-        for (const id of Object.keys(archived).sort()) {
-            const state = archived[id];
-            if (!state || state.val === null || state.val === undefined) {
-                continue;
-            }
-            const match = id.match(/Historic\.(\d{4})\.monthlyINV\.(\d{2})\.(.+)\.monthsum$/);
-            if (!match) {
-                continue;
-            }
-            const [, year, month, name] = match;
-            if (!isBillableMeter(name)) {
-                continue;
-            }
-            const base = `Historic.${year}.monthlyINV.${month}.${name}`;
-            const startState = await adapter.getStateAsync(`${base}.zaehlerstandStart`);
-            const endeState = await adapter.getStateAsync(`${base}.zaehlerstandEnde`);
-            const solarState = await adapter.getStateAsync(`${base}.solarbezug`);
-            const netzState = await adapter.getStateAsync(`${base}.netzbezug`);
-            readings.push({
-                year,
-                month,
-                name,
-                kwh: Number(state.val) / 1000,
-                zStartKwh: startState && startState.val !== null ? Number(startState.val) / 1000 : null,
-                zEndeKwh: endeState && endeState.val !== null ? Number(endeState.val) / 1000 : null,
-                solarKwh: solarState && solarState.val !== null ? Number(solarState.val) / 1000 : 0,
-                netzKwh: netzState && netzState.val !== null ? Number(netzState.val) / 1000 : 0,
-            });
-        }
-
-        const now = new Date();
-        const currentYear = String(now.getFullYear());
-        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-        for (const name of names) {
-            if (!isBillableMeter(name)) {
-                continue;
-            }
-            const monthState = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
-            const totalState = await adapter.getStateAsync(`INV.${name}.yieldtotal`);
-            const solarMonthState = await adapter.getStateAsync(`INV.${name}.solarbezugmonth`);
-            const netzMonthState = await adapter.getStateAsync(`INV.${name}.netzbezugmonth`);
-            if (monthState && monthState.val !== null && monthState.val !== undefined) {
-                const zEnde = totalState && totalState.val !== null ? Number(totalState.val) : null;
-                readings.push({
-                    year: currentYear,
-                    month: currentMonth,
-                    name,
-                    kwh: Number(monthState.val) / 1000,
-                    zStartKwh: zEnde !== null ? (zEnde - Number(monthState.val)) / 1000 : null,
-                    zEndeKwh: zEnde !== null ? zEnde / 1000 : null,
-                    solarKwh: solarMonthState && solarMonthState.val !== null ? Number(solarMonthState.val) / 1000 : 0,
-                    netzKwh: netzMonthState && netzMonthState.val !== null ? Number(netzMonthState.val) / 1000 : 0,
-                });
-            }
-        }
-
-        const rows = [
-            [
-                'Wohnung',
-                'Jahr',
-                'Monat',
-                'Zaehlerstand Monatsanfang (0:00 Uhr) kWh',
-                'Zaehlerstand Monatsende (23:59 Uhr) kWh',
-                'Verbrauch in kWh',
-                'Solarbezug in kWh',
-                'Netzbezug in kWh',
-                'Tarif Netz CHF/kWh',
-                'Tarif Solar CHF/kWh',
-                'Total in CHF',
-            ],
-        ];
-        for (const r of readings) {
-            const tariffs = await getTariffsForMonth(r.year, r.month);
-            const total = r.solarKwh * tariffs.solarbezug + r.netzKwh * tariffs.netzbezug;
-            rows.push([
-                r.name,
-                r.year,
-                r.month,
-                r.zStartKwh !== null ? r.zStartKwh.toFixed(2) : '',
-                r.zEndeKwh !== null ? r.zEndeKwh.toFixed(2) : '',
-                r.kwh.toFixed(2),
-                r.solarKwh.toFixed(2),
-                r.netzKwh.toFixed(2),
-                tariffs.netzbezug.toFixed(4),
-                tariffs.solarbezug.toFixed(4),
-                total.toFixed(2),
-            ]);
-        }
-
-        const csv = rows.map(row => row.join(';')).join('\n');
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const fileName = `export/zaehlerstaende_${timestamp}.csv`;
-        await adapter.writeFileAsync(adapter.namespace, fileName, csv);
-        await adapter.setStateAsync('Export.lastFile', fileName, true);
-        adapter.log.info(`Meter readings exported as ${fileName} (${rows.length - 1} rows)`);
-    } catch (e) {
-        adapter.log.warn(`exportMeterReadings - Error: ${e.message}`);
+/**
+ * Regenerates the "current period so far" XLSX report from MariaDB (month-to-date) and
+ * makes it available for manual download via Export.lastFile - runs both nightly (after
+ * the day's MariaDB write) and on-demand (Export.triggerMeterReadings).
+ */
+async function regenerateCurrentReport() {
+    if (!mariadbPool) {
+        adapter.log.warn('Cannot generate report: MariaDB is not enabled/connected (see instance configuration).');
+        return;
     }
-} // END exportMeterReadings
+    try {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const fromDate = `${y}-${m}-01`;
+        const toDate = `${y}-${m}-${String(now.getDate()).padStart(2, '0')}`;
+
+        const meterRows = await queryMeterPeriod(mariadbPool, fromDate, toDate);
+        const buildingRows = await queryBuildingPeriod(mariadbPool, fromDate, toDate);
+        const buffer = await buildReportWorkbook(meterRows, buildingRows, {
+            title: `Abrechnung ${fromDate} bis ${toDate} (laufender Monat)`,
+        });
+
+        const fileName = `export/${buildReportFileName('manuell', `${y}-${m}`)}`;
+        await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
+        await adapter.setStateAsync('Export.lastFile', fileName, true);
+        adapter.log.info(`Regenerated current-period report: ${fileName} (${meterRows.length} meter rows)`);
+    } catch (e) {
+        adapter.log.warn(`regenerateCurrentReport - Error: ${e.message}`);
+    }
+} // END regenerateCurrentReport
+
+/**
+ * Builds and sends the scheduled monthly/quarterly/yearly report by email, per
+ * lib/scheduling.js's decision. The file is written to the adapter's own file storage
+ * FIRST, before attempting to send - so a working copy exists under export/sent/ even
+ * if the email delivery itself fails (the whole point of this requirement).
+ *
+ * @param {{fromDate: string, toDate: string, label: string}} period
+ */
+async function sendScheduledReport(period) {
+    if (!mariadbPool) {
+        adapter.log.warn(`Scheduled report for ${period.label} is due but MariaDB is not connected - skipping.`);
+        return;
+    }
+    try {
+        const meterRows = await queryMeterPeriod(mariadbPool, period.fromDate, period.toDate);
+        const buildingRows = await queryBuildingPeriod(mariadbPool, period.fromDate, period.toDate);
+        const buffer = await buildReportWorkbook(meterRows, buildingRows, {
+            title: `Abrechnung ${period.label}`,
+        });
+
+        const year = period.fromDate.slice(0, 4);
+        const fileName = `export/sent/${year}/${buildReportFileName(adapter.config.reportSchedule, period.label)}`;
+        await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
+        adapter.log.info(`Scheduled report for ${period.label} saved: ${fileName}`);
+
+        if (adapter.config.reportRecipient) {
+            await adapter.sendToAsync('email.0', 'send', {
+                to: adapter.config.reportRecipient,
+                subject: `Solar-Abrechnung ${period.label}`,
+                text: `Im Anhang die Abrechnung für ${period.label} (${period.fromDate} bis ${period.toDate}).`,
+                attachments: [
+                    {
+                        filename: fileName.split('/').pop(),
+                        content: buffer.toString('base64'),
+                        encoding: 'base64',
+                    },
+                ],
+            });
+            adapter.log.info(`Scheduled report for ${period.label} sent to ${adapter.config.reportRecipient}.`);
+        } else {
+            adapter.log.warn(`Scheduled report for ${period.label} saved but not sent: no recipient configured.`);
+        }
+    } catch (e) {
+        // File (if it got written before the failure) stays in export/sent/ as the fallback.
+        adapter.log.error(`sendScheduledReport(${period.label}) - Error: ${e.message}`);
+    }
+} // END sendScheduledReport
+
+/**
+ * Deletes files under export/sent/ older than 365 days - the "1 year archival, then
+ * cleaned up" requirement for sent-report fallback copies.
+ */
+async function cleanupSentReports() {
+    try {
+        const files = await adapter.readDirAsync(adapter.namespace, 'export/sent');
+        const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
+        for (const f of files) {
+            if (!f.isDir && f.modifiedAt && f.modifiedAt < cutoff) {
+                await adapter.unlinkAsync(adapter.namespace, `export/sent/${f.file}`);
+                adapter.log.info(`Removed sent-report older than 1 year: ${f.file}`);
+            }
+        }
+    } catch (e) {
+        // readDirAsync throws if the folder doesn't exist yet (nothing sent so far) - not an error.
+        adapter.log.debug(`cleanupSentReports: ${e.message}`);
+    }
+} // END cleanupSentReports
+
+/**
+ * Runs once/day: decides (via lib/scheduling.js) whether a scheduled report is due
+ * today, sends it if so, and prunes sent-report copies older than 1 year regardless.
+ */
+async function checkAndSendScheduledReport() {
+    await cleanupSentReports();
+    if (!adapter.config.reportEnabled) {
+        return;
+    }
+    const period = determineScheduledPeriod(
+        new Date(),
+        adapter.config.reportSchedule,
+        Number(adapter.config.reportCutoffDay) || 1,
+    );
+    if (period) {
+        adapter.log.info(`Scheduled report due today: ${period.label} (${period.fromDate} - ${period.toDate})`);
+        await sendScheduledReport(period);
+    }
+} // END checkAndSendScheduledReport
 
 async function test() {
     try {
