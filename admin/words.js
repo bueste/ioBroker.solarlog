@@ -729,6 +729,28 @@ systemDictionary = {
     "es": "E-mail instance",
     "pl": "E-mail instance"
   },
+  "emailInstanceNotFound": {
+    "en": "not installed",
+    "de": "nicht installiert",
+    "ru": "not installed",
+    "pt": "not installed",
+    "nl": "not installed",
+    "fr": "not installed",
+    "it": "not installed",
+    "es": "not installed",
+    "pl": "not installed"
+  },
+  "emailInstanceNotFoundWarning": {
+    "en": "This e-mail instance is not installed on this system - no report can be sent until you pick an existing one.",
+    "de": "Diese E-Mail-Instanz ist auf diesem System nicht installiert - es kann kein Report verschickt werden, bis eine tatsächlich vorhandene Instanz gewählt wird.",
+    "ru": "This e-mail instance is not installed on this system.",
+    "pt": "This e-mail instance is not installed on this system.",
+    "nl": "This e-mail instance is not installed on this system.",
+    "fr": "This e-mail instance is not installed on this system.",
+    "it": "This e-mail instance is not installed on this system.",
+    "es": "This e-mail instance is not installed on this system.",
+    "pl": "This e-mail instance is not installed on this system."
+  },
   "generateReportButton": {
     "en": "Generate current-period report now (XLSX)",
     "de": "Aktuellen Bericht jetzt erzeugen (XLSX)",

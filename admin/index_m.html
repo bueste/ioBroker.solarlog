@@ -81,6 +81,14 @@
         if (!recField.value || !recField.checkValidity()) {
           errors.push(translateWord('reportRecipient') + ': ' + translateWord('invalidValue'));
         }
+        var cutoffField = document.getElementById('reportCutoffDay');
+        if (!cutoffField.value || !cutoffField.checkValidity()) {
+          errors.push(translateWord('reportCutoffDay') + ': ' + translateWord('invalidValue'));
+        }
+        var emailInstanceVal = $('#emailInstance').val();
+        if (knownEmailInstances.length && emailInstanceVal && knownEmailInstances.indexOf(emailInstanceVal) === -1) {
+          errors.push(translateWord('emailInstance') + ': ' + translateWord('emailInstanceNotFound'));
+        }
       }
       return errors;
     }
@@ -89,10 +97,41 @@
       return (typeof systemDictionary !== 'undefined' && systemDictionary[key] && systemDictionary[key][systemLang]) || key;
     }
 
+    var knownEmailInstances = [];
+
+    function populateEmailInstanceSelect(currentValue) {
+      var $sel = $('#emailInstance');
+      getAdapterInstances('email', function(instances) {
+        knownEmailInstances = instances.map(function(inst) {
+          return inst._id.replace(/^system\.adapter\./, '');
+        });
+        var found = knownEmailInstances.indexOf(currentValue) !== -1;
+        $sel.empty();
+        instances.forEach(function(inst) {
+          var id = inst._id.replace(/^system\.adapter\./, '');
+          $sel.append($('<option></option>').attr('value', id).text(id + (inst.common && inst.common.enabled ? '' : ' (deaktiviert)')));
+        });
+        if (currentValue && !found) {
+          $sel.prepend($('<option></option>').attr('value', currentValue).text(currentValue + ' - ' + translateWord('emailInstanceNotFound')));
+        }
+        if (currentValue) {
+          $sel.val(currentValue);
+        }
+        if (typeof M !== 'undefined' && M.FormSelect) {
+          M.FormSelect.init($sel[0]);
+        }
+        $('#emailInstance').on('change', function() {
+          $('#_emailInstanceWarning').toggle(knownEmailInstances.indexOf($(this).val()) === -1);
+        });
+        $('#_emailInstanceWarning').toggle(!found);
+      });
+    }
+
     // the function loadSettings has to exist ...
     function load(settings, onChange) {
       // example: select elements with id=key and class=value and insert value
       if (!settings) return;
+      populateEmailInstanceSelect(settings.emailInstance);
       $('.value').each(function() {
         var $key = $(this);
         var id = $key.attr('id');
@@ -127,7 +166,7 @@
         this.classList.toggle('invalid', !!this.value && !this.checkValidity());
         onShow();
       });
-      $('#mariadbHost, #mariadbPort').on('keyup change', function() {
+      $('#mariadbHost, #mariadbPort, #reportCutoffDay').on('keyup change', function() {
         this.classList.toggle('invalid', !!this.value && !this.checkValidity());
       });
       $('#backupKeep').on('keyup change', function() {
@@ -467,9 +506,13 @@
               <span class="translate">reportRecipient</span>
             </div>
             <div class="input-field col s12 m6 l4">
-              <input class="value" id="emailInstance" type="text" />
+              <select class="value" id="emailInstance"></select>
               <label for="emailInstance" class="translate">emailInstance</label>
-              <span class="translate">emailInstance</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span id="_emailInstanceWarning" class="translate red-text" style="display: none;">emailInstanceNotFoundWarning</span>
             </div>
           </div>
           <div class="row">
