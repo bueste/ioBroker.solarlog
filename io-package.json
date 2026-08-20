@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.4.0",
+    "version": "2.5.0",
     "news": {
+      "2.5.0": {
+        "en": "New: per-apartment Solarbezug/Netzbezug consumption split (proportional self-consumption allocation) with dual monthly tariffs. New: MariaDB daily billing journal (meter_daily/building_daily), XLSX billing reports (replaces CSV), scheduled e-mail reporting (monthly/quarterly/yearly) with 1-year sent-file retention, and a Database.testConnection button. New: status.feedinday (daily grid feed-in energy) logged to InfluxDB for Grafana. Fix: pollIntervalperiodic admin field never actually saved (wrong element id); it and the fast-poll interval now consistently mean seconds.",
+        "de": "Neu: Solarbezug/Netzbezug-Aufteilung pro Wohnung (proportionale Eigenverbrauchszuteilung) mit zwei separaten Monatstarifen. Neu: MariaDB-Abrechnungs-Journal (täglich, meter_daily/building_daily), XLSX-Abrechnungsberichte (ersetzt CSV), planmässiger E-Mail-Versand (monatlich/quartalsweise/jährlich) mit 1 Jahr Aufbewahrung der versendeten Datei, sowie ein Database.testConnection-Button. Neu: status.feedinday (tägliche Netzeinspeisung) wird für Grafana in InfluxDB geloggt. Fix: das Admin-Feld pollIntervalperiodic hat wegen eines falschen Element-IDs nie tatsächlich gespeichert; es und das schnelle Poll-Intervall meinen jetzt einheitlich Sekunden.",
+        "ru": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "pt": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "nl": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "fr": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "it": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "es": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix.",
+        "pl": "New: per-apartment self-consumption split, MariaDB billing journal, XLSX reports, scheduled e-mail reporting, daily grid feed-in tracking for Grafana, and a poll-interval bugfix."
+      },
       "2.4.0": {
         "en": "Adapter requires node.js >= 20, js-controller >= 6.0.11 and admin >= 7.6.17\nlogin fix for solarlog firmware >= 6.1.1\nDependencies have been updated",
         "de": "Adapter benötigt node.js >= 20, js-controller >= 6.0.11 und admin >= 7.6.17\nlogin fix für solarlog firmware >= 6.1.1\nAbhängigkeiten wurden aktualisiert",
