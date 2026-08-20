@@ -282,6 +282,29 @@
       "native": {}
     },
     {
+      "_id": "status.feedinday",
+      "type": "state",
+      "common": {
+        "name": "Feed in grid today",
+        "type": "number",
+        "role": "value.feedday",
+        "read": true,
+        "write": false,
+        "desc": "Total energy fed into the grid today, Wh - derived as max(0, yieldday - consyieldday), live-updating throughout the day. Logged to InfluxDB for Grafana (was missing before).",
+        "unit": "Wh",
+        "custom": {
+          "influxdb.0": {
+            "enabled": true,
+            "changesOnly": false,
+            "debounceTime": 0,
+            "storageType": "Number",
+            "retention": 157680000
+          }
+        }
+      },
+      "native": {}
+    },
+    {
       "_id": "status.feedinactive",
       "type": "state",
       "common": {

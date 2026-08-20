@@ -195,6 +195,7 @@ async function main() {
         }
 
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
+        await ensureFeedinDayObject();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
         numinv = 0;
@@ -675,6 +676,36 @@ async function ensureBillingSplitStates(name) {
         native: {},
     });
 } // END ensureBillingSplitStates
+
+async function ensureFeedinDayObject() {
+    // Declared in io-package.json instanceObjects too, but js-controller does not
+    // reliably re-sync instanceObjects common properties (incl. the influxdb.0 custom
+    // block) into an already-running instance on a plain file update - only on a real
+    // recognized version upgrade. Creating it explicitly here guarantees it exists with
+    // InfluxDB logging enabled regardless of how the new code was deployed.
+    await adapter.setObjectNotExistsAsync('status.feedinday', {
+        type: 'state',
+        common: {
+            name: 'Feed in grid today',
+            type: 'number',
+            role: 'value.feedday',
+            read: true,
+            write: false,
+            desc: 'Total energy fed into the grid today, Wh - derived as max(0, yieldday - consyieldday), live-updating throughout the day.',
+            unit: 'Wh',
+            custom: {
+                'influxdb.0': {
+                    enabled: true,
+                    changesOnly: false,
+                    debounceTime: 0,
+                    storageType: 'Number',
+                    retention: 157680000,
+                },
+            },
+        },
+        native: {},
+    });
+} // END ensureFeedinDayObject
 
 async function ensureDailySplitStates(name) {
     await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugday`, {
@@ -1432,7 +1463,13 @@ async function readSolarlogData(reqData, resData) {
                     // for live monitoring only; the authoritative billed figures are the once-nightly
                     // accumulateMonthlyPerDevice() snapshot (see there for why: daysum can still tick
                     // up until midnight).
-                    const dayRatio = selfConsumptionRatio(parseInt(json[105]) || 0, parseInt(json[111]) || 0);
+                    const yieldDayWh = parseInt(json[105]) || 0;
+                    const consDayWh = parseInt(json[111]) || 0;
+                    const dayRatio = selfConsumptionRatio(yieldDayWh, consDayWh);
+                    // Complementary quantity to dayRatio: whatever wasn't self-consumed (capped at
+                    // what was actually produced) was fed into the grid. Building-wide, not per-meter -
+                    // there's only one grid connection point, feed-in isn't attributable to one meter.
+                    await adapter.setStateAsync('status.feedinday', Math.max(0, yieldDayWh - consDayWh), true);
                     for (let suzi = 0; suzi < namLeng; suzi++) {
                         if (deviceclasses[suzi] !== 'Batterie') {
                             adapter.log.debug(`INV.${names[suzi]}: ${daysum[suzi]}`);
