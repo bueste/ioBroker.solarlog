@@ -84,6 +84,7 @@
       <ul>
         <li><a href="#tabs-1" class="translate">Basic Settings</a></li>
         <li><a href="#tabs-2" class="translate">Advanced Settings</a></li>
+        <li><a href="#tabs-3" class="translate">Billing</a></li>
       </ul>
       <div id="tabs-1">
         <p>
@@ -108,6 +109,27 @@
           <span><label for="longitude" class="translate">longitude:</label></span><input class="value" id="longitude" /><br>
           <span><label for="inclination" class="translate">inclination:</label></span><input class="value" id="inclination" /><br>
           <span><label for="azimuth" class="translate">azimuth:</label></span><input class="value" id="azimuth" /><br>
+        </p>
+      </div>
+      <div id="tabs-3">
+        <p>
+          <span><label for="mariadbEnabled" class="translate">mariadbEnabled</label></span><input class="value" id="mariadbEnabled" type="checkbox" /><br>
+          <span><label for="mariadbHost" class="translate">mariadbHost</label></span><input class="value" id="mariadbHost" /><br>
+          <span><label for="mariadbPort" class="translate">mariadbPort</label></span><input class="value" id="mariadbPort" /><br>
+          <span><label for="mariadbDatabase" class="translate">mariadbDatabase</label></span><input class="value" id="mariadbDatabase" /><br>
+          <span><label for="mariadbUser" class="translate">mariadbUser</label></span><input class="value" id="mariadbUser" /><br>
+          <span><label for="mariadbPassword" class="translate">mariadbPassword</label></span><input class="value" id="mariadbPassword" type="password" /><br>
+        </p>
+        <p>
+          <span><label for="reportEnabled" class="translate">reportEnabled</label></span><input class="value" id="reportEnabled" type="checkbox" /><br>
+          <span><label for="reportRecipient" class="translate">reportRecipient</label></span><input class="value" id="reportRecipient" /><br>
+          <span><label for="reportSchedule" class="translate">reportSchedule</label></span>
+          <select class="value" id="reportSchedule">
+            <option value="monthly" class="translate">reportScheduleMonthly</option>
+            <option value="quarterly" class="translate">reportScheduleQuarterly</option>
+            <option value="yearly" class="translate">reportScheduleYearly</option>
+          </select><br>
+          <span><label for="reportCutoffDay" class="translate">reportCutoffDay</label></span><input class="value" id="reportCutoffDay" min="1" max="28" /><br>
         </p>
       </div>
     </div>
