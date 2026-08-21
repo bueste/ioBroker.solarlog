@@ -565,15 +565,15 @@ systemDictionary = {
     "pl": "Enable MariaDB billing journal"
   },
   "mariadbHost": {
-    "en": "MariaDB host",
-    "de": "MariaDB Host",
-    "ru": "MariaDB host",
-    "pt": "MariaDB host",
-    "nl": "MariaDB host",
-    "fr": "MariaDB host",
-    "it": "MariaDB host",
-    "es": "MariaDB host",
-    "pl": "MariaDB host"
+    "en": "MariaDB host (use the hostname, e.g. s076.cyon.net - not the IP, or TLS certificate verification fails)",
+    "de": "MariaDB Host (Hostname verwenden, z.B. s076.cyon.net - nicht die IP, sonst schlägt die TLS-Zertifikatsprüfung fehl)",
+    "ru": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "pt": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "nl": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "fr": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "it": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "es": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
+    "pl": "MariaDB host (use the hostname, not the IP - TLS verification needs it)"
   },
   "mariadbPort": {
     "en": "Port",

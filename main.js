@@ -986,15 +986,13 @@ async function ensureMariaDbPool() {
             password: adapter.config.mariadbPassword,
             database: adapter.config.mariadbDatabase,
             connectionLimit: 3,
-            // Encrypts the connection - without this, the password and every row of tenant
-            // billing data crossed the public internet in plaintext. rejectUnauthorized is
-            // false because this specific host presents a self-signed certificate (typical
-            // for a shared-hosting DB not meant for public exposure), so this stops passive
-            // eavesdropping but does NOT verify server identity against a CA - an active
-            // MITM on the network path could still impersonate the server. The real fix is
-            // operational: restrict the DB's remote-access firewall to this adapter's own
-            // IP, or pin the specific certificate. See the Billing tab hint / adapter docs.
-            ssl: { rejectUnauthorized: false },
+            // Full certificate chain + hostname verification. The server presents a
+            // properly CA-issued certificate (GlobalSign, *.cyon.net) - it was only ever
+            // misdiagnosed as self-signed because connecting via the raw IP address
+            // (149.126.4.85) can never match a hostname-pattern certificate's CN. Using
+            // the *.cyon.net hostname in mariadbHost instead of the IP is what makes this
+            // work; falling back to an IP here would silently break verification again.
+            ssl: { rejectUnauthorized: true },
         });
         // A connection pool is an EventEmitter - an unhandled 'error' event (e.g. the DB
         // dropping an idle connection in the background, unrelated to any single query)

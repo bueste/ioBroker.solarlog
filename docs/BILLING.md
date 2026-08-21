@@ -206,7 +206,7 @@ Three ways to get one:
 
 | Area | Measure |
 |---|---|
-| DB transport | TLS since 2.5.7 (`ssl: { rejectUnauthorized: false }`) — the remote host presents a self-signed cert, so this stops passive eavesdropping but not an active MITM. Operational follow-up: firewall the DB to this host's IP, or pin the cert. |
+| DB transport | Full TLS certificate chain + hostname verification (`ssl: { rejectUnauthorized: true }`, since 2.5.13). The server presents a properly CA-issued certificate (GlobalSign, `*.cyon.net`) — it was briefly misdiagnosed as self-signed because connecting via the raw IP can never match a hostname-pattern cert's CN; using the `*.cyon.net` hostname in `mariadbHost` instead of the IP is what makes full verification work. |
 | Credentials | `mariadbPassword` is `encryptedNative` + `protectedNative`; never logged. |
 | SQL | 100% parameterized queries (`lib/db.js`), no string interpolation of any input. |
 | Admin UI | No `.html()`/`innerHTML` usage — all dynamic output goes through `.text()`. |
