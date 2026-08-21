@@ -23,6 +23,8 @@ const {
     upsertMeterUmlagekosten,
     queryMeterPeriod,
     queryBuildingPeriod,
+    queryTariffForMonth,
+    queryMeterUmlagekostenPeriod,
 } = require('./lib/db');
 const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
@@ -486,9 +488,13 @@ async function main() {
                     // Optional: Umlagekosten (a flat, non-energy-based monthly cost, e.g.
                     // building maintenance) for one or more specific meters, over the SAME
                     // month range - a second, independent thing this bulk tool can set.
+                    // "bezeichnung" (defaults to "Umlagekosten" for a plain admin-UI bulk
+                    // set) lets this same meter/month carry other itemized lines too - set
+                    // by the web app with a specific label, see private/src/Tariffs.php.
                     let umlagekostenCount = 0;
                     if (p.umlagekostenActive) {
                         const umlagekosten = Number(p.umlagekosten);
+                        const bezeichnung = (p.umlagekostenBezeichnung || 'Umlagekosten').trim() || 'Umlagekosten';
                         const meters = Array.isArray(p.umlagekostenMeters) ? p.umlagekostenMeters : [];
                         if (!(umlagekosten >= 0)) {
                             throw new Error('Umlagekosten must be a number >= 0.');
@@ -507,6 +513,7 @@ async function main() {
                                     m.year,
                                     m.month,
                                     meterName,
+                                    bezeichnung,
                                     umlagekosten,
                                     true,
                                 );
@@ -514,7 +521,7 @@ async function main() {
                             }
                         }
                         adapter.log.info(
-                            `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), ${umlagekosten} CHF for [${meters.join(', ')}].`,
+                            `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), "${bezeichnung}" ${umlagekosten} CHF for [${meters.join(', ')}].`,
                         );
                     }
 
@@ -1585,11 +1592,36 @@ async function ensureAllMonthlyTariffsUntil(untilYear) {
 } // END ensureAllMonthlyTariffsUntil
 
 async function getTariffsForMonth(year, month) {
-    // Per-month Netzbezug/Solarbezug tariffs, editable by the landlord in the object tree
-    // (pre-created for years ahead at adapter startup, see ensureAllMonthlyTariffsUntil).
-    // Each falls back to its own Tarif.default.* only if that specific month was never
-    // filled in.
+    // Per-month Netzbezug/Solarbezug tariffs. MariaDB (tariff_schedule) is now the
+    // PRIMARY source: the abr.bronnenhuber.ch web application writes tariffs there
+    // directly and has no access to ioBroker's object tree, so a tariff set via the web
+    // app must actually be read back from here to take effect. (Bug fixed 2026-08:
+    // this previously only worked ioBroker -> MariaDB via setTariffForMonth(), never the
+    // other way - a tariff changed in the web app silently had zero billing effect.)
+    // Falls back to the ioBroker Tarif.<year>.<month>.* states (then Tarif.default.*)
+    // when MariaDB is unavailable or no row exists yet for this month - keeps the
+    // adapter fully usable standalone, matching the original local-first design.
     await ensureMonthlyTariffState(year, month);
+
+    if (mariadbPool) {
+        try {
+            const dbRow = await queryTariffForMonth(mariadbPool, Number(year), Number(month));
+            if (dbRow) {
+                const netzbezug = Number(dbRow.netzbezug_chf_kwh);
+                const solarbezug = Number(dbRow.solarbezug_chf_kwh);
+                // Mirror into the ioBroker object tree too, so the Admin UI/object view
+                // reflects what's actually being billed, not a stale value from before
+                // MariaDB (or the web app) last changed it.
+                await adapter.setStateAsync(`Tarif.${year}.${month}.netzbezug`, netzbezug, true);
+                await adapter.setStateAsync(`Tarif.${year}.${month}.solarbezug`, solarbezug, true);
+                return { netzbezug, solarbezug };
+            }
+        } catch (e) {
+            adapter.log.warn(
+                `getTariffsForMonth(${year}-${month}): MariaDB read failed, falling back to ioBroker states: ${e.message}`,
+            );
+        }
+    }
 
     async function resolve(kind, fallbackDefault) {
         const monthState = await adapter.getStateAsync(`Tarif.${year}.${month}.${kind}`);
@@ -1632,9 +1664,13 @@ async function regenerateCurrentReport() {
 
         const meterRows = await queryMeterPeriod(mariadbPool, fromDate, toDate);
         const buildingRows = await queryBuildingPeriod(mariadbPool, fromDate, toDate);
-        const buffer = await buildReportWorkbook(meterRows, buildingRows, {
-            title: `Abrechnung ${fromDate} bis ${toDate} (laufender Monat)`,
-        });
+        const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, fromDate, toDate);
+        const buffer = await buildReportWorkbook(
+            meterRows,
+            buildingRows,
+            { title: `Abrechnung ${fromDate} bis ${toDate} (laufender Monat)` },
+            umlagekostenRows,
+        );
 
         const fileName = `export/${buildReportFileName('manuell', `${y}-${m}`)}`;
         await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
@@ -1694,9 +1730,13 @@ async function sendScheduledReport(period) {
     try {
         const meterRows = await queryMeterPeriod(mariadbPool, period.fromDate, period.toDate);
         const buildingRows = await queryBuildingPeriod(mariadbPool, period.fromDate, period.toDate);
-        const buffer = await buildReportWorkbook(meterRows, buildingRows, {
-            title: `Abrechnung ${period.label}`,
-        });
+        const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, period.fromDate, period.toDate);
+        const buffer = await buildReportWorkbook(
+            meterRows,
+            buildingRows,
+            { title: `Abrechnung ${period.label}` },
+            umlagekostenRows,
+        );
 
         const year = period.fromDate.slice(0, 4);
         const fileName = `export/sent/${year}/${buildReportFileName(adapter.config.reportSchedule, period.label)}`;

@@ -261,6 +261,7 @@
         var umlagekostenActive = $('#umlagekostenActive').prop('checked');
         if (umlagekostenActive) {
           var umlagekosten = parseFloat($('#umlagekostenChf').val());
+          var umlagekostenBezeichnung = ($('#umlagekostenBezeichnung').val() || '').trim() || 'Umlagekosten';
           var umlagekostenMeters = $('#umlagekostenMeterCheckboxes input:checked').map(function() {
             return $(this).val();
           }).get();
@@ -274,8 +275,10 @@
           }
           payload.umlagekostenActive = true;
           payload.umlagekosten = umlagekosten;
+          payload.umlagekostenBezeichnung = umlagekostenBezeichnung;
           payload.umlagekostenMeters = umlagekostenMeters;
           confirmMsg += '\n' + translateWord('umlagekostenConfirmSuffix')
+            .replace('{bezeichnung}', umlagekostenBezeichnung)
             .replace('{chf}', umlagekosten)
             .replace('{meters}', umlagekostenMeters.join(', '));
         }
@@ -707,6 +710,11 @@
             </div>
           </div>
           <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <input id="umlagekostenBezeichnung" type="text" maxlength="100" placeholder="z.B. Zaehlerkosten" />
+              <label for="umlagekostenBezeichnung" class="translate">umlagekostenBezeichnung</label>
+              <span class="translate">umlagekostenBezeichnung</span>
+            </div>
             <div class="input-field col s12 m6 l4">
               <input id="umlagekostenChf" type="number" step="0.01" min="0" />
               <label for="umlagekostenChf" class="translate">umlagekostenChf</label>

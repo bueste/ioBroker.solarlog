@@ -983,6 +983,17 @@ systemDictionary = {
     "es": "A fixed CHF amount per month, independent of energy consumption.",
     "pl": "A fixed CHF amount per month, independent of energy consumption."
   },
+  "umlagekostenBezeichnung": {
+    "en": "Label (e.g. \"Meter fee\") - lets the same apartment/month have several distinct cost lines",
+    "de": "Bezeichnung (z.B. \"Zaehlerkosten\") - erlaubt mehrere unterschiedliche Kostenposten pro Wohnung/Monat",
+    "ru": "Label - lets the same apartment/month have several distinct cost lines",
+    "pt": "Label - lets the same apartment/month have several distinct cost lines",
+    "nl": "Label - lets the same apartment/month have several distinct cost lines",
+    "fr": "Label - lets the same apartment/month have several distinct cost lines",
+    "it": "Label - lets the same apartment/month have several distinct cost lines",
+    "es": "Label - lets the same apartment/month have several distinct cost lines",
+    "pl": "Label - lets the same apartment/month have several distinct cost lines"
+  },
   "umlagekostenChf": {
     "en": "Umlagekosten CHF/month",
     "de": "Umlagekosten CHF/Monat",
@@ -1028,15 +1039,15 @@ systemDictionary = {
     "pl": "Select at least one apartment/meter for Umlagekosten."
   },
   "umlagekostenConfirmSuffix": {
-    "en": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "de": "Ausserdem: Umlagekosten {chf} CHF/Monat für: {meters}",
-    "ru": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "pt": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "nl": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "fr": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "it": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "es": "Also: Umlagekosten {chf} CHF/month for: {meters}",
-    "pl": "Also: Umlagekosten {chf} CHF/month for: {meters}"
+    "en": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "de": "Ausserdem: {bezeichnung} {chf} CHF/Monat für: {meters}",
+    "ru": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "pt": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "nl": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "fr": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "it": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "es": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
+    "pl": "Also: {bezeichnung} {chf} CHF/month for: {meters}"
   },
   "generateReportButton": {
     "en": "Generate current-period report now (XLSX)",

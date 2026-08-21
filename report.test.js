@@ -127,12 +127,44 @@ describe('buildReportWorkbook', () => {
             'Netzbezug kWh',
             'Tarif Netzbezug CHF/kWh',
             'Total Bezug CHF',
+            'Umlagekosten CHF',
+            'Umlagekosten Details',
+            'Total inkl. Umlagekosten CHF',
         ]);
 
         // header row + 1 aggregated data row
         expect(meterSheet.rowCount).to.equal(2);
         const dataRow = meterSheet.getRow(2).values.slice(1);
-        expect(dataRow).to.deep.equal([2026, 'August', 'WHG 1', 6, 0.2, 4, 0.28, 2.32]);
+        // Umlagekosten CHF and Total inkl. Umlagekosten CHF are checked exactly; the
+        // Details cell is checked separately below because ExcelJS represents an empty
+        // cell inconsistently depending on access pattern (null vs [null] vs undefined) -
+        // not meaningful to this test, which only cares that it's empty.
+        expect(dataRow.slice(0, 9)).to.deep.equal([2026, 'August', 'WHG 1', 6, 0.2, 4, 0.28, 2.32, 0]);
+        expect(dataRow[10]).to.equal(2.32); // Total inkl. Umlagekosten CHF
+        const detailsCell = dataRow[9];
+        const isEmpty = detailsCell === null || detailsCell === undefined || detailsCell === '' ||
+            (Array.isArray(detailsCell) && detailsCell.every(v => v === null || v === undefined));
+        expect(isEmpty, `expected Umlagekosten Details cell to be empty, got ${JSON.stringify(detailsCell)}`).to.be.true;
+    });
+
+    it('adds itemized Umlagekosten lines to their Total Bezug CHF, keeping a human-readable details string, when umlagekostenRows are passed', async () => {
+        const meterRows = [dailyRow()];
+        const umlagekostenRows = [
+            { reading_year: 2026, reading_month: 8, meter_name: 'WHG 1', bezeichnung: 'Zaehlerkosten', umlagekosten_chf: 5, active: true },
+            { reading_year: 2026, reading_month: 8, meter_name: 'WHG 1', bezeichnung: 'Allgemeinstrom-Anteil', umlagekosten_chf: 12.5, active: true },
+            // Inactive - must NOT be added.
+            { reading_year: 2026, reading_month: 8, meter_name: 'WHG 1', bezeichnung: 'Storniert', umlagekosten_chf: 999, active: false },
+        ];
+
+        const buffer = await buildReportWorkbook(meterRows, [], { title: 'Test Report' }, umlagekostenRows);
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const meterSheet = workbook.getWorksheet('Abrechnung');
+        const dataRow = meterSheet.getRow(2).values.slice(1);
+        // total_chf (2.32) + 5 + 12.5 = 19.82, the inactive 999 line must not be included.
+        expect(dataRow[8]).to.equal(17.5); // Umlagekosten CHF
+        expect(dataRow[9]).to.equal('Zaehlerkosten: 5.00, Allgemeinstrom-Anteil: 12.50'); // Details
+        expect(dataRow[10]).to.equal(19.82); // Total inkl. Umlagekosten CHF
     });
 
     it('never puts a non-billable meter (WR*, Gesamt) into the Abrechnung sheet', async () => {
