@@ -2,7 +2,7 @@
 
 > Status: **Konzept**. Keine der hier beschriebenen Webapp-Komponenten existiert bisher -
 > dieses Dokument beschreibt die Zielarchitektur für eine künftige, separate PHP-Webapplikation
-> unter `abr.infra.bronnenhuber.ch`, die auf derselben MariaDB aufsetzt, die `iobroker.solarlog`
+> unter `abr.bronnenhuber.ch`, die auf derselben MariaDB aufsetzt, die `iobroker.solarlog`
 > heute schon für das Abrechnungsjournal nutzt. Siehe [BILLING.md](BILLING.md) für die bereits
 > implementierte Abrechnungslogik im Adapter.
 
@@ -12,7 +12,7 @@ Die Solarabrechnung für Trimmis läuft heute vollständig über den ioBroker-Ad
 `10.195.30.116`) und eine gemeinsame MariaDB auf Cyon (`149.126.4.85`, Host `s076.cyon.net`).
 Geplant ist eine richtige, mehrbenutzerfähige Abrechnungs-Webapplikation: Login für Verwaltung
 und Eigentümer/Vermieter, optionales TOTP, Mieter-Stammdaten (Adresse) pro Wohnung, dynamische
-Auswertungen - erreichbar unter `abr.infra.bronnenhuber.ch`, gehostet auf normalem
+Auswertungen - erreichbar unter `abr.bronnenhuber.ch`, gehostet auf normalem
 Cyon-Webhosting.
 
 **Wichtige Abgrenzung:** TOTP ist ausschliesslich eine Sache der Webapplikation - der
@@ -24,7 +24,7 @@ ioBroker-Adapter hat damit nichts zu tun, weder beim Speichern noch beim Prüfen
 ┌───────────────────────────┐        ┌──────────────────────────────┐        ┌─────────────────────────────┐
 │  ioBroker.solarlog          │        │   MariaDB (Cyon,               │        │   Webapplikation (PHP,        │
 │  (lokal, 10.195.30.116)     │──TLS──▶│   s076.cyon.net)               │◀──TLS──│   Cyon Shared Hosting,        │
-│  - Solar-Log Polling        │  write │   - meter_daily                 │  read/ │   abr.infra.bronnenhuber.ch)  │
+│  - Solar-Log Polling        │  write │   - meter_daily                 │  read/ │   abr.bronnenhuber.ch)        │
 │  - Nächtl. Akkumulation     │        │   - building_daily              │  write │   - Login/Sessions/TOTP       │
 │  - Tarif-Bulk-Set (Admin)   │        │   - tariff_schedule              │        │   - Mieterverwaltung          │
 │  - lokaler Fallback ohne    │        │   - meter_umlagekosten           │        │   - Dynamische Auswertungen   │
@@ -194,10 +194,10 @@ v1 ist ein reines **Auswertungs- und Verwaltungsportal**, keine Abrechnungsdokum
 
 ## Was noch fehlt, bevor umgesetzt werden kann
 
-1. **DNS:** `abr.infra.bronnenhuber.ch` einrichten (A/CNAME - konkreter Zielwert erst bekannt,
+1. **DNS:** `abr.bronnenhuber.ch` einrichten (A/CNAME - konkreter Zielwert erst bekannt,
    sobald das Cyon-Paket für diese Subdomain feststeht).
 2. **Hosting-Zugriff:** FTP/SSH- oder Git-Deploy-Zugang zum Cyon-Paket, auf dem
-   `abr.infra.bronnenhuber.ch` liegen soll.
+   `abr.bronnenhuber.ch` liegen soll.
 3. **PHP-Version/Composer-Verfügbarkeit** auf dem gewählten Cyon-Paket prüfen, sobald Zugriff
    besteht - bestimmt die genaue Bibliothekswahl (TOTP, PDF/XLSX).
 
