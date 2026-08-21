@@ -167,6 +167,37 @@ describe('buildReportWorkbook', () => {
         expect(dataRow[10]).to.equal(19.82); // Total inkl. Umlagekosten CHF
     });
 
+    it('never shifts the Gebaeude sheet date by a day (regression: writing the raw local-midnight Date object let ExcelJS serialize it via UTC fields, silently rendering e.g. 2026-08-20 as 2026-08-19 in Europe/Zurich summer time)', async () => {
+        const buildingRows = [
+            {
+                // Local midnight, exactly what the mariadb driver hands back for a DATE column.
+                reading_date: new Date(2026, 7, 20, 0, 0, 0),
+                produktion_kwh: 32.605,
+                verbrauch_kwh: 59.312,
+                einspeisung_kwh: 12.032,
+                eigenverbrauchsquote: 0.3469,
+            },
+        ];
+        const buffer = await buildReportWorkbook([], buildingRows, { title: 'Test Report' });
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const buildingSheet = workbook.getWorksheet('Gebaeude');
+        const dataRow = buildingSheet.getRow(2).values.slice(1);
+        expect(dataRow[0]).to.equal('2026-08-20');
+    });
+
+    it('also handles a plain "YYYY-MM-DD" string reading_date (e.g. from a test fixture, not the live mariadb driver) without shifting it', async () => {
+        const buildingRows = [
+            { reading_date: '2026-08-20', produktion_kwh: 32.605, verbrauch_kwh: 59.312, einspeisung_kwh: 12.032, eigenverbrauchsquote: 0.3469 },
+        ];
+        const buffer = await buildReportWorkbook([], buildingRows, { title: 'Test Report' });
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const buildingSheet = workbook.getWorksheet('Gebaeude');
+        const dataRow = buildingSheet.getRow(2).values.slice(1);
+        expect(dataRow[0]).to.equal('2026-08-20');
+    });
+
     it('never puts a non-billable meter (WR*, Gesamt) into the Abrechnung sheet', async () => {
         const meterRows = [dailyRow({ meter_name: 'WHG 1' }), dailyRow({ meter_name: 'WR 1' })];
         const buffer = await buildReportWorkbook(meterRows, [], {});
