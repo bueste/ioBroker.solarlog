@@ -9,9 +9,10 @@ is expected to be kept in sync with it.
 If this document and the code ever disagree, the code is authoritative — file an issue
 or fix the doc in the same PR that changes behavior.
 
-> A multi-user web application (login, TOTP, tenant management, dynamic reporting) is
-> planned on top of the same MariaDB database this adapter already writes to. See
-> [ARCHITECTURE.md](ARCHITECTURE.md) for the concept — nothing there is built yet.
+> A multi-user web application (login, TOTP, tenant management, dynamic reporting,
+> periodic e-mail subscriptions) is **live** at `abr.bronnenhuber.ch`, on top of the same
+> MariaDB database this adapter writes to. See [ARCHITECTURE.md](ARCHITECTURE.md) for how
+> it's built and how the two systems share the database without a sync protocol.
 
 ## Data flow
 
@@ -126,6 +127,7 @@ CREATE TABLE meter_daily (
   tarif_netz DECIMAL(8,4),
   tarif_solar DECIMAL(8,4),
   total_chf DECIMAL(10,2),
+  berechnungsmethode VARCHAR(20) NOT NULL DEFAULT 'tagesnetto',  -- 'tagesnetto' | 'integriert', see below
   PRIMARY KEY (reading_date, meter_name)
 );
 
@@ -134,7 +136,8 @@ CREATE TABLE building_daily (
   produktion_kwh DECIMAL(12,3),
   verbrauch_kwh DECIMAL(12,3),
   einspeisung_kwh DECIMAL(12,3),
-  eigenverbrauchsquote DECIMAL(6,4)
+  eigenverbrauchsquote DECIMAL(6,4),      -- actually stores AUTARKIEGRAD, see webapp Reports.php docblock
+  berechnungsmethode VARCHAR(20) NOT NULL DEFAULT 'tagesnetto'
 );
 
 CREATE TABLE meter_yearly_historic (
@@ -143,11 +146,72 @@ CREATE TABLE meter_yearly_historic (
   yield_kwh DECIMAL(14,3),
   PRIMARY KEY (reading_year, meter_name)
 );
+
+-- Itemized flat monthly costs on top of the energy-based total (e.g. "Zaehlerkosten",
+-- "Allgemeinstrom-Anteil") - a meter/month can carry several distinct named lines side
+-- by side, hence bezeichnung being part of the primary key. Writable from BOTH sides
+-- (adapter admin UI bulk-set, and the webapp's /tarife.php) - MariaDB is the single
+-- source of truth, same as tariff_schedule below.
+CREATE TABLE meter_umlagekosten (
+  reading_year INT NOT NULL,
+  reading_month INT NOT NULL,
+  meter_name VARCHAR(64) NOT NULL,
+  bezeichnung VARCHAR(100) NOT NULL DEFAULT 'Umlagekosten',
+  umlagekosten_chf DECIMAL(10,2) NOT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  PRIMARY KEY (reading_year, reading_month, meter_name, bezeichnung)
+);
+
+-- One row per calendar month; read by BOTH the adapter (getTariffsForMonth(), MariaDB
+-- primary / ioBroker-state fallback) and the webapp (Tariffs.php) - see ARCHITECTURE.md
+-- "Tarife/Umlagekosten sync" for the bug this schema's write/read symmetry fixes.
+CREATE TABLE tariff_schedule (
+  reading_year INT NOT NULL,
+  reading_month INT NOT NULL,
+  netzbezug_chf_kwh DECIMAL(8,4) NOT NULL,
+  solarbezug_chf_kwh DECIMAL(8,4) NOT NULL,
+  PRIMARY KEY (reading_year, reading_month)
+);
 ```
 
 `meter_yearly_historic` holds coarse 2020–present yearly sums imported from the
 adapter's pre-existing yearly archive states. Context only — it has no solar/grid split
 and no day-level granularity, so it's excluded from billing reports entirely.
+
+### Hybrid self-consumption method: `tagesnetto` vs. `integriert` (since 2.5.14)
+
+The proportional-allocation `ratio` above (2.5.13 and earlier: **always** the coarse
+"Tagesnetto" method — same-day net production vs. net consumption) has a known blind
+spot: on a day with both a morning grid draw AND an evening feed-in (e.g. cloudy morning,
+sunny evening), netting the whole day together can misstate how much of that day's
+consumption was actually solar-covered in real time. Since 2.5.14 the adapter also builds
+a true **intraday-integrated** ratio (`accumulateIntradayDelta()`, `main.js`) — it diffs
+`status.yieldday`/`status.consyieldday` on every ~30s poll and accumulates genuine
+self-consumed/grid-drawn/fed-in energy for elapsed intervals only, never bridging a poll
+gap longer than 5 minutes with an assumption of constant power.
+
+At the nightly write (`accumulateMonthlyPerDevice()`), the adapter picks whichever method
+it can trust for that specific day:
+
+```js
+const INTRADAY_COVERAGE_THRESHOLD = 0.95; // main.js
+if (coverageRatio >= INTRADAY_COVERAGE_THRESHOLD && selfConsumedWh + gridDrawWh > 0) {
+    ratio = selfConsumedWh / (selfConsumedWh + gridDrawWh);   // true intraday integration
+    berechnungsmethode = 'integriert';
+} else {
+    ratio = selfConsumptionRatio(yieldWh, consWh);            // same-day-net fallback
+    berechnungsmethode = 'tagesnetto';
+}
+```
+
+`coverageRatio` = seconds of the day actually covered by uninterrupted polling ÷ seconds
+elapsed since midnight. Below 95% (VPN outage, ioBroker/adapter restart mid-day, Solar-Log
+unreachable, etc.) the day automatically falls back to the coarser but always-available
+Tagesnetto method rather than trusting a partial integration. Both methods are persisted
+per row (`meter_daily.berechnungsmethode` / `building_daily.berechnungsmethode`), never
+silently mixed into one number — the webapp surfaces this transparently (dashboard hint
+text, per-month badges on the Wohnungen detail page) so a Verwaltung/Vermieter always
+knows how many days of a given period used which method.
 
 ## Reconciliation guarantees
 
@@ -170,6 +234,20 @@ fixed (2.5.7).
    a restart landing on the nightly cron) would silently add that day's consumption
    twice into the running lifetime meter reading, unlike the MariaDB row (which is
    upsert-safe by construction).
+
+4. **Report format parity (adapter ↔ webapp)**: both the adapter's scheduled/manual XLSX
+   (`lib/report.js buildReportWorkbook()`) and the webapp's on-demand "Nachversand"/
+   subscription XLSX (`private/src/ReportMail.php buildXlsx()`) render the exact same two
+   sheets, columns, and monthly-aggregation logic — verified this way rather than assumed,
+   by generating both for the same period and diffing every cell programmatically
+   (Python/openpyxl). Fixed as a genuine divergence found during that check (2.5.16-era):
+   the "Gebaeude" sheet's date column was silently rendered one day early in every report
+   ever generated by the adapter, because ExcelJS serializes a raw JS `Date` object via
+   its *UTC* fields while the `mariadb` driver hands back `reading_date` at *local*
+   midnight — in Europe/Zurich summer time (UTC+2) that's 22:00 UTC the previous day. Now
+   written as a plain `"YYYY-MM-DD"` string instead of a native date cell
+   (`formatDateForSheet()`), with a regression test for both the `Date`-object and
+   string-input cases.
 
 ### Known methodological limit
 
