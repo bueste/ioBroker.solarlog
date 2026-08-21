@@ -9,6 +9,10 @@ is expected to be kept in sync with it.
 If this document and the code ever disagree, the code is authoritative — file an issue
 or fix the doc in the same PR that changes behavior.
 
+> A multi-user web application (login, TOTP, tenant management, dynamic reporting) is
+> planned on top of the same MariaDB database this adapter already writes to. See
+> [ARCHITECTURE.md](ARCHITECTURE.md) for the concept — nothing there is built yet.
+
 ## Data flow
 
 ```mermaid
