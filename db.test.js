@@ -102,4 +102,75 @@ describe('buildBuildingDailyRow', () => {
         });
         expect(row.eigenverbrauchsquote).to.equal(0);
     });
+
+    it('defaults berechnungsmethode to tagesnetto when omitted', () => {
+        const row = buildBuildingDailyRow({
+            date: '2026-08-20',
+            produktionKwh: 50,
+            verbrauchKwh: 100,
+            einspeisungKwh: 0,
+        });
+        expect(row.berechnungsmethode).to.equal('tagesnetto');
+    });
+
+    it('uses the explicit selbstverbrauchtKwh (true intraday-integrated figure) instead of min(produktion,verbrauch) when provided - this is the whole point of the "integriert" method: it can differ from the tagesnetto approximation', () => {
+        // Same production/consumption totals as the first test (which gave 0.5), but a
+        // genuinely lower true self-consumption because some of the daytime production
+        // didn't overlap with actual demand and had to be exported instead.
+        const row = buildBuildingDailyRow({
+            date: '2026-08-20',
+            produktionKwh: 50,
+            verbrauchKwh: 100,
+            einspeisungKwh: 15,
+            selbstverbrauchtKwh: 35,
+            berechnungsmethode: 'integriert',
+        });
+        expect(row.eigenverbrauchsquote).to.equal(0.35);
+        expect(row.berechnungsmethode).to.equal('integriert');
+    });
+
+    it('rejects an unknown berechnungsmethode rather than silently storing garbage', () => {
+        expect(() =>
+            buildBuildingDailyRow({
+                date: '2026-08-20',
+                produktionKwh: 50,
+                verbrauchKwh: 100,
+                einspeisungKwh: 0,
+                berechnungsmethode: 'geraten',
+            }),
+        ).to.throw(/berechnungsmethode/);
+    });
+});
+
+describe('buildMeterDailyRow berechnungsmethode', () => {
+    it('defaults to tagesnetto when omitted', () => {
+        const row = buildMeterDailyRow({
+            date: '2026-08-20',
+            meterName: 'WHG 1',
+            zStartKwh: 0,
+            zEndeKwh: 10,
+            verbrauchKwh: 10,
+            solarKwh: 6,
+            netzKwh: 4,
+            tarifNetz: 0.28,
+            tarifSolar: 0.2,
+        });
+        expect(row.berechnungsmethode).to.equal('tagesnetto');
+    });
+
+    it('carries through an explicit berechnungsmethode', () => {
+        const row = buildMeterDailyRow({
+            date: '2026-08-20',
+            meterName: 'WHG 1',
+            zStartKwh: 0,
+            zEndeKwh: 10,
+            verbrauchKwh: 10,
+            solarKwh: 6,
+            netzKwh: 4,
+            tarifNetz: 0.28,
+            tarifSolar: 0.2,
+            berechnungsmethode: 'integriert',
+        });
+        expect(row.berechnungsmethode).to.equal('integriert');
+    });
 });

@@ -223,6 +223,7 @@ async function main() {
 
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
+        await ensureIntradayAccumulatorObjects();
         await ensureDatabaseObjects();
         await ensureExportObjects();
         await ensureTariffDefaultObjects();
@@ -741,6 +742,112 @@ async function ensureArchiveState(id, name, desc) {
     });
 } // END ensureArchiveState
 
+const INTRADAY_GAP_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Builds true intraday-resolution running totals for today's self-consumed/grid-drawn/
+ * fed-in energy, from the DELTA of status.yieldday/status.consyieldday between this call
+ * and the last one - the device's own trusted cumulative day counters, not the ambiguous
+ * live pac/conspac power states (see commit message for why those were ruled out).
+ *
+ * Called every time yieldday/consyieldday are freshly read from the SolarLog (roughly
+ * every pollIntervalcurrent/pollIntervalperiodic seconds, ~30s by default) - passes the
+ * SAME just-parsed values already used to update those two states, no extra state read.
+ *
+ * Deliberately does NOT bridge a gap longer than INTRADAY_GAP_THRESHOLD_MS with an
+ * assumption of constant power - a genuine measurement only ever counts for a genuinely
+ * covered interval. accumulateMonthlyPerDevice() checks how much of the day was actually
+ * covered and falls back to the tagesnetto method for any day where coverage was too
+ * spotty (VPN down, ioBroker restarted, etc.) to trust the integration.
+ *
+ * @param {number} yieldDayWh status.yieldday, just parsed from the current poll
+ * @param {number} consYieldDayWh status.consyieldday, just parsed from the current poll
+ */
+async function accumulateIntradayDelta(yieldDayWh, consYieldDayWh) {
+    const now = Date.now();
+    const nowDate = new Date();
+    const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+
+    const lastDateState = await adapter.getStateAsync('status.intradayLastDate');
+    const lastDate = lastDateState && lastDateState.val;
+
+    if (lastDate !== todayStr) {
+        // First call today (or ever) - nothing to diff against yet. Reset the running
+        // totals and just record today's baseline; accumulateMonthlyPerDevice() reads
+        // these again near midnight, so nothing needs resetting there - the next new-day
+        // detection here handles it naturally.
+        await adapter.setStateAsync('status.intradaySelfConsumedWh', 0, true);
+        await adapter.setStateAsync('status.intradayGridDrawWh', 0, true);
+        await adapter.setStateAsync('status.intradayFeedinWh', 0, true);
+        await adapter.setStateAsync('status.intradayCoveredSeconds', 0, true);
+        await adapter.setStateAsync('status.intradayLastYieldDayWh', yieldDayWh, true);
+        await adapter.setStateAsync('status.intradayLastConsYieldDayWh', consYieldDayWh, true);
+        await adapter.setStateAsync('status.intradayLastPollTs', now, true);
+        await adapter.setStateAsync('status.intradayLastDate', todayStr, true);
+        return;
+    }
+
+    const [lastYieldState, lastConsState, lastPollState] = await Promise.all([
+        adapter.getStateAsync('status.intradayLastYieldDayWh'),
+        adapter.getStateAsync('status.intradayLastConsYieldDayWh'),
+        adapter.getStateAsync('status.intradayLastPollTs'),
+    ]);
+    const lastYieldDayWh = lastYieldState && lastYieldState.val !== null ? Number(lastYieldState.val) : yieldDayWh;
+    const lastConsYieldDayWh =
+        lastConsState && lastConsState.val !== null ? Number(lastConsState.val) : consYieldDayWh;
+    const lastPollTs = lastPollState && lastPollState.val !== null ? Number(lastPollState.val) : now;
+    const deltaMs = now - lastPollTs;
+
+    if (deltaMs > 0 && deltaMs <= INTRADAY_GAP_THRESHOLD_MS) {
+        // max(0, ...) guards against a transient device counter glitch ticking backward -
+        // never subtract energy that wasn't genuinely observed.
+        const deltaYield = Math.max(0, yieldDayWh - lastYieldDayWh);
+        const deltaCons = Math.max(0, consYieldDayWh - lastConsYieldDayWh);
+        const deltaSelfConsumed = Math.min(deltaYield, deltaCons);
+        const deltaFeedin = Math.max(0, deltaYield - deltaCons);
+        const deltaGridDraw = Math.max(0, deltaCons - deltaYield);
+
+        const [selfConsumedState, gridDrawState, feedinState, coveredState] = await Promise.all([
+            adapter.getStateAsync('status.intradaySelfConsumedWh'),
+            adapter.getStateAsync('status.intradayGridDrawWh'),
+            adapter.getStateAsync('status.intradayFeedinWh'),
+            adapter.getStateAsync('status.intradayCoveredSeconds'),
+        ]);
+
+        await Promise.all([
+            adapter.setStateAsync(
+                'status.intradaySelfConsumedWh',
+                (selfConsumedState && selfConsumedState.val ? Number(selfConsumedState.val) : 0) + deltaSelfConsumed,
+                true,
+            ),
+            adapter.setStateAsync(
+                'status.intradayGridDrawWh',
+                (gridDrawState && gridDrawState.val ? Number(gridDrawState.val) : 0) + deltaGridDraw,
+                true,
+            ),
+            adapter.setStateAsync(
+                'status.intradayFeedinWh',
+                (feedinState && feedinState.val ? Number(feedinState.val) : 0) + deltaFeedin,
+                true,
+            ),
+            adapter.setStateAsync(
+                'status.intradayCoveredSeconds',
+                (coveredState && coveredState.val ? Number(coveredState.val) : 0) + deltaMs / 1000,
+                true,
+            ),
+        ]);
+    }
+    // else: gap too big (or clock/counter went backward) - this interval simply isn't
+    // counted as covered. The baseline below still advances regardless, so the NEXT
+    // delta measures forward from here instead of compounding the gap into it.
+
+    await Promise.all([
+        adapter.setStateAsync('status.intradayLastYieldDayWh', yieldDayWh, true),
+        adapter.setStateAsync('status.intradayLastConsYieldDayWh', consYieldDayWh, true),
+        adapter.setStateAsync('status.intradayLastPollTs', now, true),
+    ]);
+} // END accumulateIntradayDelta
+
 async function accumulateMonthlyPerDevice() {
     // Solar-Log only reports per-device totals per YEAR (code 854), not per month.
     // We accumulate several things per device ourselves from the daily 'daysum' values:
@@ -779,7 +886,40 @@ async function accumulateMonthlyPerDevice() {
         const consState = await adapter.getStateAsync('status.consyieldday');
         const yieldWh = prodState && prodState.val !== null ? Number(prodState.val) : 0;
         const consWh = consState && consState.val !== null ? Number(consState.val) : 0;
-        const ratio = selfConsumptionRatio(yieldWh, consWh);
+
+        // Hybrid Tagesnetto/integriert: prefer the true intraday-integrated self-
+        // consumption ratio (built from accumulateIntradayDelta()'s running totals),
+        // but only if fastpoll coverage today was good enough to trust it - falls back
+        // to the coarser same-day-net approximation otherwise (VPN/ioBroker downtime,
+        // adapter restart mid-day, etc.). See accumulateIntradayDelta() for how the
+        // running totals are built and why they're robust to individual poll gaps.
+        const INTRADAY_COVERAGE_THRESHOLD = 0.95;
+        const selfConsumedState = await adapter.getStateAsync('status.intradaySelfConsumedWh');
+        const gridDrawState = await adapter.getStateAsync('status.intradayGridDrawWh');
+        const feedinState = await adapter.getStateAsync('status.intradayFeedinWh');
+        const coveredState = await adapter.getStateAsync('status.intradayCoveredSeconds');
+        const selfConsumedWh = selfConsumedState && selfConsumedState.val ? Number(selfConsumedState.val) : 0;
+        const gridDrawWh = gridDrawState && gridDrawState.val ? Number(gridDrawState.val) : 0;
+        const feedinIntegratedWh = feedinState && feedinState.val ? Number(feedinState.val) : 0;
+        const coveredSeconds = coveredState && coveredState.val ? Number(coveredState.val) : 0;
+        const secondsSinceMidnight = (now - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 1000;
+        const coverageRatio = secondsSinceMidnight > 0 ? coveredSeconds / secondsSinceMidnight : 0;
+
+        let ratio;
+        let einspeisungWh;
+        let berechnungsmethode;
+        if (coverageRatio >= INTRADAY_COVERAGE_THRESHOLD && selfConsumedWh + gridDrawWh > 0) {
+            ratio = selfConsumedWh / (selfConsumedWh + gridDrawWh);
+            einspeisungWh = feedinIntegratedWh;
+            berechnungsmethode = 'integriert';
+        } else {
+            ratio = selfConsumptionRatio(yieldWh, consWh);
+            einspeisungWh = Math.max(0, yieldWh - consWh);
+            berechnungsmethode = 'tagesnetto';
+        }
+        adapter.log.debug(
+            `accumulateMonthlyPerDevice: Fastpoll-Abdeckung heute ${(coverageRatio * 100).toFixed(1)}% -> Methode "${berechnungsmethode}"`,
+        );
 
         const meterDailyRows = [];
         const dailyTariffs = mariadbPool
@@ -825,6 +965,7 @@ async function accumulateMonthlyPerDevice() {
                         netzKwh: netzWh / 1000,
                         tarifNetz: dailyTariffs.netzbezug,
                         tarifSolar: dailyTariffs.solarbezug,
+                        berechnungsmethode,
                     }),
                 );
             }
@@ -920,7 +1061,9 @@ async function accumulateMonthlyPerDevice() {
                     date: todayStr,
                     produktionKwh: yieldWh / 1000,
                     verbrauchKwh: consWh / 1000,
-                    einspeisungKwh: Math.max(0, yieldWh - consWh) / 1000,
+                    einspeisungKwh: einspeisungWh / 1000,
+                    selbstverbrauchtKwh: (consWh * ratio) / 1000,
+                    berechnungsmethode,
                 });
                 await upsertBuildingDaily(mariadbPool, buildingRow);
                 adapter.log.info(
@@ -1087,6 +1230,76 @@ async function ensureFeedinDayObject() {
         native: {},
     });
 } // END ensureFeedinDayObject
+
+/**
+ * Running-total/tracking states for accumulateIntradayDelta()'s intraday integration
+ * (see there). Internal working state, not meant for dashboards - no influxdb logging.
+ */
+async function ensureIntradayAccumulatorObjects() {
+    const numberState = (name, desc) => ({
+        type: 'state',
+        common: { name, type: 'number', role: 'value', read: true, write: false, desc, unit: 'Wh' },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync(
+        'status.intradaySelfConsumedWh',
+        numberState('Intraday self-consumed today (integrated)', 'Running Wh self-consumed today, built from yieldday/consyieldday deltas between polls - see accumulateIntradayDelta().'),
+    );
+    await adapter.setObjectNotExistsAsync(
+        'status.intradayGridDrawWh',
+        numberState('Intraday grid draw today (integrated)', 'Running Wh drawn from the grid today, built the same way.'),
+    );
+    await adapter.setObjectNotExistsAsync(
+        'status.intradayFeedinWh',
+        numberState('Intraday feed-in today (integrated)', 'Running Wh fed into the grid today, built the same way - distinct from the coarser status.feedinday.'),
+    );
+    await adapter.setObjectNotExistsAsync('status.intradayCoveredSeconds', {
+        type: 'state',
+        common: {
+            name: 'Intraday coverage seconds today',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            desc: 'Seconds of today actually covered by a poll gap <= 5 minutes - used to decide whether the integrated method is trustworthy for today (see accumulateMonthlyPerDevice()).',
+            unit: 's',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync(
+        'status.intradayLastYieldDayWh',
+        numberState('Intraday tracking: last yieldday reading', 'Internal - last status.yieldday value seen by accumulateIntradayDelta(), for computing the next delta.'),
+    );
+    await adapter.setObjectNotExistsAsync(
+        'status.intradayLastConsYieldDayWh',
+        numberState('Intraday tracking: last consyieldday reading', 'Internal - last status.consyieldday value seen by accumulateIntradayDelta().'),
+    );
+    await adapter.setObjectNotExistsAsync('status.intradayLastPollTs', {
+        type: 'state',
+        common: {
+            name: 'Intraday tracking: last poll timestamp',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            desc: 'Internal - Date.now() of the last accumulateIntradayDelta() call, for computing the gap to the next one.',
+            unit: 'ms',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('status.intradayLastDate', {
+        type: 'state',
+        common: {
+            name: 'Intraday tracking: last date',
+            type: 'string',
+            role: 'value',
+            read: true,
+            write: false,
+            desc: 'Internal - calendar date (YYYY-MM-DD) accumulateIntradayDelta() last ran for, used to detect the day rolling over and reset the running totals.',
+        },
+        native: {},
+    });
+} // END ensureIntradayAccumulatorObjects
 
 async function ensureDatabaseObjects() {
     // Same js-controller instanceObjects-sync caveat as ensureFeedinDayObject() above -
@@ -2082,6 +2295,7 @@ async function readSolarlogData(reqData, resData) {
                     await adapter.setStateAsync('status.consyieldmonth', parseInt(json[113]), true);
                     await adapter.setStateAsync('status.consyieldyear', parseInt(json[114]), true);
                     await adapter.setStateAsync('status.consyieldtotal', parseInt(json[115]), true);
+                    await accumulateIntradayDelta(parseInt(json[105]), parseInt(json[111]));
                 } catch (e) {
                     adapter.log.warn(`readSolarlogData - error in standard data request: ${e}`);
                     throw e;
@@ -2617,6 +2831,7 @@ async function readSolarlogData(reqData, resData) {
                     await adapter.setStateAsync('status.consyieldmonth', parseInt(json[113]), true);
                     await adapter.setStateAsync('status.consyieldyear', parseInt(json[114]), true);
                     await adapter.setStateAsync('status.consyieldtotal', parseInt(json[115]), true);
+                    await accumulateIntradayDelta(parseInt(json[105]), parseInt(json[111]));
                 } catch (e) {
                     adapter.log.warn(`readSolarlogData - error in standard data request: ${e}`);
                     throw e;
