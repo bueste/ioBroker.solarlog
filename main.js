@@ -19,6 +19,8 @@ const {
     ensureSchema,
     upsertMeterDaily,
     upsertBuildingDaily,
+    upsertTariffSchedule,
+    upsertMeterUmlagekosten,
     queryMeterPeriod,
     queryBuildingPeriod,
 } = require('./lib/db');
@@ -453,6 +455,10 @@ async function main() {
                         adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
                     }
                 }
+            } else if (obj.command === 'getBillableMeters') {
+                if (obj.callback) {
+                    adapter.sendTo(obj.from, obj.command, { meters: names.filter(isBillableMeter) }, obj.callback);
+                }
             } else if (obj.command === 'bulkSetTariffs') {
                 try {
                     const p = obj.message || {};
@@ -475,11 +481,51 @@ async function main() {
                     adapter.log.info(
                         `Bulk tariff set: ${months.length} month(s) from ${fromMonth}/${fromYear} to ${toMonth}/${toYear} - Netzbezug ${netzbezug}, Solarbezug ${solarbezug} CHF/kWh.`,
                     );
+
+                    // Optional: Umlagekosten (a flat, non-energy-based monthly cost, e.g.
+                    // building maintenance) for one or more specific meters, over the SAME
+                    // month range - a second, independent thing this bulk tool can set.
+                    let umlagekostenCount = 0;
+                    if (p.umlagekostenActive) {
+                        const umlagekosten = Number(p.umlagekosten);
+                        const meters = Array.isArray(p.umlagekostenMeters) ? p.umlagekostenMeters : [];
+                        if (!(umlagekosten >= 0)) {
+                            throw new Error('Umlagekosten must be a number >= 0.');
+                        }
+                        const invalidMeters = meters.filter(name => !isBillableMeter(name));
+                        if (meters.length === 0 || invalidMeters.length > 0) {
+                            throw new Error('Select at least one valid apartment/Allgemein meter for Umlagekosten.');
+                        }
+                        if (!mariadbPool) {
+                            throw new Error('MariaDB is not enabled/connected - Umlagekosten requires it.');
+                        }
+                        for (const m of months) {
+                            for (const meterName of meters) {
+                                await upsertMeterUmlagekosten(
+                                    mariadbPool,
+                                    m.year,
+                                    m.month,
+                                    meterName,
+                                    umlagekosten,
+                                    true,
+                                );
+                                umlagekostenCount++;
+                            }
+                        }
+                        adapter.log.info(
+                            `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), ${umlagekosten} CHF for [${meters.join(', ')}].`,
+                        );
+                    }
+
                     if (obj.callback) {
+                        const parts = [`${months.length} Monat(e) aktualisiert.`];
+                        if (umlagekostenCount) {
+                            parts.push(`${umlagekostenCount} Umlagekosten-Zeile(n) gesetzt.`);
+                        }
                         adapter.sendTo(
                             obj.from,
                             obj.command,
-                            { ok: true, count: months.length, message: `${months.length} Monat(e) aktualisiert.` },
+                            { ok: true, count: months.length, message: parts.join(' ') },
                             obj.callback,
                         );
                     }
@@ -1248,6 +1294,16 @@ async function setTariffForMonth(year, month, netzbezug, solarbezug) {
     await ensureMonthlyTariffState(year, month);
     await adapter.setStateAsync(`Tarif.${year}.${month}.netzbezug`, netzbezug, true);
     await adapter.setStateAsync(`Tarif.${year}.${month}.solarbezug`, solarbezug, true);
+    // Also written to MariaDB (tariff_schedule) - preparation for a future web
+    // application to read/write tariffs directly, without needing ioBroker object-tree
+    // access. Best-effort: a DB hiccup here must not undo the ioBroker state write above.
+    if (mariadbPool) {
+        try {
+            await upsertTariffSchedule(mariadbPool, year, Number(month), netzbezug, solarbezug);
+        } catch (e) {
+            adapter.log.warn(`setTariffForMonth(${year}-${month}) - MariaDB write failed: ${e.message}`);
+        }
+    }
 } // END setTariffForMonth
 
 async function ensureTariffDefaultObjects() {

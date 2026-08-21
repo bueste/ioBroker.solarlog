@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.11",
+    "version": "2.5.12",
     "news": {
+      "2.5.12": {
+        "en": "New: tariffs set via the bulk tool are now also written to MariaDB (tariff_schedule table), not just ioBroker states - preparation for a future web application to read/write billing config directly. New: optional Umlagekosten (flat monthly CHF cost per apartment, independent of energy consumption, e.g. building maintenance) - set for one or more meters over the same month range, stored in MariaDB (meter_umlagekosten table) only.",
+        "de": "Neu: Über das Bulk-Werkzeug gesetzte Tarife werden jetzt auch in MariaDB geschrieben (Tabelle tariff_schedule), nicht nur in ioBroker-Zustände - Vorbereitung für eine künftige Webanwendung, die Abrechnungskonfiguration direkt lesen/schreiben kann. Neu: optionale Umlagekosten (fixer monatlicher CHF-Betrag pro Wohnung, unabhängig vom Energieverbrauch, z.B. Gebäudeunterhalt) - für eine oder mehrere Wohnungen über denselben Zeitraum setzbar, nur in MariaDB gespeichert (Tabelle meter_umlagekosten).",
+        "ru": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "pt": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "nl": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "fr": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "it": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "es": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment.",
+        "pl": "New: tariffs also written to MariaDB. New: optional flat monthly Umlagekosten per apartment."
+      },
       "2.5.11": {
         "en": "New: a bulk tariff-set tool on the Billing tab - pick a from/to month+year range and a Netzbezugspreis/Solarbezugspreis, and apply it to every month in that range at once, instead of editing Tarif.<year>.<month> one at a time in the object tree. Fix: dates shown to a reader (report e-mail placeholders {periode}/{von}/{bis}) now use Swiss format - a spelled-out month/year (\"August 2026\") and DD-MM-YYYY - instead of ISO \"2026-08\"/\"2026-08-01\". The XLSX report itself already spelled out the month; this was the one remaining place still showing ISO dates to a tenant.",
         "de": "Neu: ein Bulk-Tarif-Werkzeug auf dem Billing-Tab - einen Von/Bis-Monat+Jahr-Zeitraum sowie Netzbezugspreis/Solarbezugspreis wählen und auf einmal für jeden Monat in diesem Zeitraum setzen, statt Tarif.<Jahr>.<Monat> einzeln im Objektbaum zu bearbeiten. Fix: Daten, die eine lesende Person zu sehen bekommt (Report-E-Mail-Platzhalter {periode}/{von}/{bis}), verwenden jetzt das Schweizer Format - ausgeschriebener Monat/Jahr (\"August 2026\") und TT-MM-JJJJ - statt ISO \"2026-08\"/\"2026-08-01\". Der XLSX-Bericht selbst schrieb den Monat bereits aus; das war die letzte verbliebene Stelle mit ISO-Daten für Mieter.",

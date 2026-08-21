@@ -961,6 +961,83 @@ systemDictionary = {
     "es": "Set tariffs for {count} month(s), {from} through {to}?",
     "pl": "Set tariffs for {count} month(s), {from} through {to}?"
   },
+  "umlagekostenActive": {
+    "en": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "de": "Auch Umlagekosten setzen (pauschaler Monatsbetrag pro Wohnung)",
+    "ru": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "pt": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "nl": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "fr": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "it": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "es": "Also set Umlagekosten (flat monthly cost per apartment)",
+    "pl": "Also set Umlagekosten (flat monthly cost per apartment)"
+  },
+  "umlagekostenHint": {
+    "en": "A fixed CHF amount per month, independent of energy consumption (e.g. building maintenance, a common-area share). Stored in MariaDB only (meter_umlagekosten), not in the object tree.",
+    "de": "Ein fixer CHF-Betrag pro Monat, unabhängig vom Energieverbrauch (z.B. Gebäudeunterhalt, Anteil Gemeinschaftsräume). Wird nur in MariaDB gespeichert (meter_umlagekosten), nicht im Objektbaum.",
+    "ru": "A fixed CHF amount per month, independent of energy consumption.",
+    "pt": "A fixed CHF amount per month, independent of energy consumption.",
+    "nl": "A fixed CHF amount per month, independent of energy consumption.",
+    "fr": "A fixed CHF amount per month, independent of energy consumption.",
+    "it": "A fixed CHF amount per month, independent of energy consumption.",
+    "es": "A fixed CHF amount per month, independent of energy consumption.",
+    "pl": "A fixed CHF amount per month, independent of energy consumption."
+  },
+  "umlagekostenChf": {
+    "en": "Umlagekosten CHF/month",
+    "de": "Umlagekosten CHF/Monat",
+    "ru": "Umlagekosten CHF/month",
+    "pt": "Umlagekosten CHF/month",
+    "nl": "Umlagekosten CHF/month",
+    "fr": "Umlagekosten CHF/month",
+    "it": "Umlagekosten CHF/month",
+    "es": "Umlagekosten CHF/month",
+    "pl": "Umlagekosten CHF/month"
+  },
+  "umlagekostenMeters": {
+    "en": "Apply to these apartments/meters:",
+    "de": "Für diese Wohnungen/Zähler anwenden:",
+    "ru": "Apply to these apartments/meters:",
+    "pt": "Apply to these apartments/meters:",
+    "nl": "Apply to these apartments/meters:",
+    "fr": "Apply to these apartments/meters:",
+    "it": "Apply to these apartments/meters:",
+    "es": "Apply to these apartments/meters:",
+    "pl": "Apply to these apartments/meters:"
+  },
+  "umlagekostenNoMeters": {
+    "en": "No meters found yet - the adapter needs to have polled the Solar-Log device at least once.",
+    "de": "Noch keine Zähler gefunden - der Adapter muss das Solar-Log-Gerät zuerst mindestens einmal abgefragt haben.",
+    "ru": "No meters found yet.",
+    "pt": "No meters found yet.",
+    "nl": "No meters found yet.",
+    "fr": "No meters found yet.",
+    "it": "No meters found yet.",
+    "es": "No meters found yet.",
+    "pl": "No meters found yet."
+  },
+  "umlagekostenNoSelection": {
+    "en": "Select at least one apartment/meter for Umlagekosten.",
+    "de": "Mindestens eine Wohnung/einen Zähler für Umlagekosten auswählen.",
+    "ru": "Select at least one apartment/meter for Umlagekosten.",
+    "pt": "Select at least one apartment/meter for Umlagekosten.",
+    "nl": "Select at least one apartment/meter for Umlagekosten.",
+    "fr": "Select at least one apartment/meter for Umlagekosten.",
+    "it": "Select at least one apartment/meter for Umlagekosten.",
+    "es": "Select at least one apartment/meter for Umlagekosten.",
+    "pl": "Select at least one apartment/meter for Umlagekosten."
+  },
+  "umlagekostenConfirmSuffix": {
+    "en": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "de": "Ausserdem: Umlagekosten {chf} CHF/Monat für: {meters}",
+    "ru": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "pt": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "nl": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "fr": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "it": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "es": "Also: Umlagekosten {chf} CHF/month for: {meters}",
+    "pl": "Also: Umlagekosten {chf} CHF/month for: {meters}"
+  },
   "generateReportButton": {
     "en": "Generate current-period report now (XLSX)",
     "de": "Aktuellen Bericht jetzt erzeugen (XLSX)",

@@ -204,6 +204,28 @@
         M.FormSelect.init(document.getElementById('tariffToMonth'));
       }
 
+      sendTo(null, 'getBillableMeters', {}, function(result) {
+        var $box = $('#umlagekostenMeterCheckboxes');
+        $box.empty();
+        var meters = (result && result.meters) || [];
+        meters.forEach(function(name, idx) {
+          var id = 'umlagekostenMeter_' + idx;
+          var $col = $('<div class="col s6 m4 l3"></div>');
+          $col.append(
+            $('<input type="checkbox" class="filled-in" />').attr('id', id).val(name),
+          );
+          $col.append($('<label></label>').attr('for', id).text(name));
+          $box.append($col);
+        });
+        if (meters.length === 0) {
+          $box.append($('<span></span>').addClass('translate').text(translateWord('umlagekostenNoMeters')));
+        }
+      });
+
+      $('#umlagekostenActive').on('change', function() {
+        $('#_umlagekostenFields').toggle($(this).prop('checked'));
+      });
+
       $('#tariffBulkSetButton').on('click', function() {
         var fromMonth = parseInt($('#tariffFromMonth').val(), 10);
         var fromYear = parseInt($('#tariffFromYear').val(), 10);
@@ -230,21 +252,44 @@
           .replace('{to}', toLabel)
           .replace('{netz}', netzbezug)
           .replace('{solar}', solarbezug);
+
+        var payload = {
+          fromYear: fromYear, fromMonth: fromMonth, toYear: toYear, toMonth: toMonth,
+          netzbezug: netzbezug, solarbezug: solarbezug,
+        };
+
+        var umlagekostenActive = $('#umlagekostenActive').prop('checked');
+        if (umlagekostenActive) {
+          var umlagekosten = parseFloat($('#umlagekostenChf').val());
+          var umlagekostenMeters = $('#umlagekostenMeterCheckboxes input:checked').map(function() {
+            return $(this).val();
+          }).get();
+          if (!(umlagekosten >= 0)) {
+            $('#tariffBulkSetResult').text(translateWord('tariffBulkInvalid')).css('color', 'red');
+            return;
+          }
+          if (umlagekostenMeters.length === 0) {
+            $('#tariffBulkSetResult').text(translateWord('umlagekostenNoSelection')).css('color', 'red');
+            return;
+          }
+          payload.umlagekostenActive = true;
+          payload.umlagekosten = umlagekosten;
+          payload.umlagekostenMeters = umlagekostenMeters;
+          confirmMsg += '\n' + translateWord('umlagekostenConfirmSuffix')
+            .replace('{chf}', umlagekosten)
+            .replace('{meters}', umlagekostenMeters.join(', '));
+        }
+
         if (!window.confirm(confirmMsg)) {
           return;
         }
 
         $('#tariffBulkSetResult').text('...').css('color', '');
-        sendTo(
-          null,
-          'bulkSetTariffs',
-          { fromYear: fromYear, fromMonth: fromMonth, toYear: toYear, toMonth: toMonth, netzbezug: netzbezug, solarbezug: solarbezug },
-          function(result) {
-            $('#tariffBulkSetResult')
-              .text((result && result.message) || '')
-              .css('color', result && result.ok ? 'green' : 'red');
-          },
-        );
+        sendTo(null, 'bulkSetTariffs', payload, function(result) {
+          $('#tariffBulkSetResult')
+            .text((result && result.message) || '')
+            .css('color', result && result.ok ? 'green' : 'red');
+        });
       });
     }
 
@@ -648,6 +693,32 @@
             <label for="tariffSolarbezug" class="translate">tariffBulkSolarbezug</label>
             <span class="translate">tariffBulkSolarbezug</span>
           </div>
+        </div>
+        <div class="row">
+          <div class="input-field col s12 m6 l4">
+            <input id="umlagekostenActive" type="checkbox" />
+            <label for="umlagekostenActive" class="translate">umlagekostenActive</label>
+          </div>
+        </div>
+        <div id="_umlagekostenFields" style="display: none;">
+          <div class="row">
+            <div class="col s12">
+              <span class="translate">umlagekostenHint</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <input id="umlagekostenChf" type="number" step="0.01" min="0" />
+              <label for="umlagekostenChf" class="translate">umlagekostenChf</label>
+              <span class="translate">umlagekostenChf</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col s12">
+              <span class="translate chips-label">umlagekostenMeters</span>
+            </div>
+          </div>
+          <div class="row" id="umlagekostenMeterCheckboxes"></div>
         </div>
         <div class="row">
           <div class="col s12">
