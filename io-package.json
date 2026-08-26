@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.16",
+    "version": "2.5.17",
     "news": {
       "2.5.13": {
         "en": "Security fix: the MariaDB connection now uses FULL TLS certificate chain and hostname verification (was: encryption without verification, since 2.5.7). The server's certificate was misdiagnosed as self-signed earlier - it's actually a properly CA-issued certificate (GlobalSign, *.cyon.net); the earlier failure was simply connecting via the raw IP address, which can never match a hostname-pattern certificate. mariadbHost must now be the *.cyon.net hostname, not the IP - already updated on this instance.",

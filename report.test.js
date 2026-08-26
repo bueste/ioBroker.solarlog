@@ -167,6 +167,43 @@ describe('buildReportWorkbook', () => {
         expect(dataRow[10]).to.equal(19.82); // Total inkl. Umlagekosten CHF
     });
 
+    it('applies a standing default (reading_year=0/reading_month=0) to every month for that meter, same as Tarif.default', async () => {
+        const meterRows = [dailyRow({ reading_date: '2026-08-01' }), dailyRow({ reading_date: '2026-09-01' })];
+        const umlagekostenRows = [
+            { reading_year: 0, reading_month: 0, meter_name: 'WHG 1', bezeichnung: 'Zaehlerkosten', umlagekosten_chf: 5, active: true },
+        ];
+        const result = aggregateMeterRowsByMonth(meterRows, umlagekostenRows);
+        expect(result).to.have.lengthOf(2);
+        for (const r of result) {
+            expect(r.umlagekostenChf).to.equal(5);
+            expect(r.umlagekostenDetails).to.equal('Zaehlerkosten: 5.00');
+        }
+    });
+
+    it('lets an explicit month-specific row override the standing default for that ONE month only, keyed by Bezeichnung', async () => {
+        const meterRows = [dailyRow({ reading_date: '2026-08-01' }), dailyRow({ reading_date: '2026-09-01' })];
+        const umlagekostenRows = [
+            { reading_year: 0, reading_month: 0, meter_name: 'WHG 1', bezeichnung: 'Zaehlerkosten', umlagekosten_chf: 5, active: true },
+            // August gets a corrected/topped-up amount for the SAME Bezeichnung - replaces the default for August only.
+            { reading_year: 2026, reading_month: 8, meter_name: 'WHG 1', bezeichnung: 'Zaehlerkosten', umlagekosten_chf: 8, active: true },
+        ];
+        const result = aggregateMeterRowsByMonth(meterRows, umlagekostenRows);
+        const august = result.find(r => r.month === 8);
+        const september = result.find(r => r.month === 9);
+        expect(august.umlagekostenChf).to.equal(8); // overridden
+        expect(september.umlagekostenChf).to.equal(5); // still the default
+    });
+
+    it('adds an explicit row with a DIFFERENT Bezeichnung than the default as an extra line, not a replacement', async () => {
+        const meterRows = [dailyRow({ reading_date: '2026-08-01' })];
+        const umlagekostenRows = [
+            { reading_year: 0, reading_month: 0, meter_name: 'WHG 1', bezeichnung: 'Zaehlerkosten', umlagekosten_chf: 5, active: true },
+            { reading_year: 2026, reading_month: 8, meter_name: 'WHG 1', bezeichnung: 'Sonderumlage', umlagekosten_chf: 20, active: true },
+        ];
+        const result = aggregateMeterRowsByMonth(meterRows, umlagekostenRows);
+        expect(result[0].umlagekostenChf).to.equal(25); // 5 (default) + 20 (extra explicit line)
+    });
+
     it('never shifts the Gebaeude sheet date by a day (regression: writing the raw local-midnight Date object let ExcelJS serialize it via UTC fields, silently rendering e.g. 2026-08-20 as 2026-08-19 in Europe/Zurich summer time)', async () => {
         const buildingRows = [
             {

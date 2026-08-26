@@ -262,6 +262,7 @@
         if (umlagekostenActive) {
           var umlagekosten = parseFloat($('#umlagekostenChf').val());
           var umlagekostenBezeichnung = ($('#umlagekostenBezeichnung').val() || '').trim() || 'Umlagekosten';
+          var umlagekostenIsDefault = $('#umlagekostenIsDefault').prop('checked');
           var umlagekostenMeters = $('#umlagekostenMeterCheckboxes input:checked').map(function() {
             return $(this).val();
           }).get();
@@ -277,10 +278,21 @@
           payload.umlagekosten = umlagekosten;
           payload.umlagekostenBezeichnung = umlagekostenBezeichnung;
           payload.umlagekostenMeters = umlagekostenMeters;
-          confirmMsg += '\n' + translateWord('umlagekostenConfirmSuffix')
-            .replace('{bezeichnung}', umlagekostenBezeichnung)
-            .replace('{chf}', umlagekosten)
-            .replace('{meters}', umlagekostenMeters.join(', '));
+          // "Als Standardwert" applies to every month going forward with no expiry - it
+          // deliberately ignores the Von/Bis range above (that range still governs the
+          // Tarif part of this same bulk-set, unaffected by this checkbox).
+          if (umlagekostenIsDefault) {
+            payload.umlagekostenIsDefault = true;
+            confirmMsg += '\n' + translateWord('umlagekostenConfirmSuffixDefault')
+              .replace('{bezeichnung}', umlagekostenBezeichnung)
+              .replace('{chf}', umlagekosten)
+              .replace('{meters}', umlagekostenMeters.join(', '));
+          } else {
+            confirmMsg += '\n' + translateWord('umlagekostenConfirmSuffix')
+              .replace('{bezeichnung}', umlagekostenBezeichnung)
+              .replace('{chf}', umlagekosten)
+              .replace('{meters}', umlagekostenMeters.join(', '));
+          }
         }
 
         if (!window.confirm(confirmMsg)) {
@@ -707,6 +719,15 @@
           <div class="row">
             <div class="col s12">
               <span class="translate">umlagekostenHint</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="input-field col s12 m6 l4">
+              <input id="umlagekostenIsDefault" type="checkbox" />
+              <label for="umlagekostenIsDefault" class="translate">umlagekostenIsDefault</label>
+            </div>
+            <div class="col s12">
+              <span class="translate">umlagekostenIsDefaultHint</span>
             </div>
           </div>
           <div class="row">

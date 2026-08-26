@@ -506,23 +506,38 @@ async function main() {
                         if (!mariadbPool) {
                             throw new Error('MariaDB is not enabled/connected - Umlagekosten requires it.');
                         }
-                        for (const m of months) {
+                        if (p.umlagekostenIsDefault) {
+                            // Standing default (reading_year=0, reading_month=0 - see
+                            // lib/db.js upsertMeterUmlagekosten docblock) - applies to every
+                            // month for this meter+bezeichnung with no expiry, ignoring the
+                            // Von/Bis range entirely (that range still governs the Tarif
+                            // part of this same bulk-set above).
                             for (const meterName of meters) {
-                                await upsertMeterUmlagekosten(
-                                    mariadbPool,
-                                    m.year,
-                                    m.month,
-                                    meterName,
-                                    bezeichnung,
-                                    umlagekosten,
-                                    true,
-                                );
+                                await upsertMeterUmlagekosten(mariadbPool, 0, 0, meterName, bezeichnung, umlagekosten, true);
                                 umlagekostenCount++;
                             }
+                            adapter.log.info(
+                                `Umlagekosten default set: "${bezeichnung}" ${umlagekosten} CHF/Monat (jeden Monat) für [${meters.join(', ')}].`,
+                            );
+                        } else {
+                            for (const m of months) {
+                                for (const meterName of meters) {
+                                    await upsertMeterUmlagekosten(
+                                        mariadbPool,
+                                        m.year,
+                                        m.month,
+                                        meterName,
+                                        bezeichnung,
+                                        umlagekosten,
+                                        true,
+                                    );
+                                    umlagekostenCount++;
+                                }
+                            }
+                            adapter.log.info(
+                                `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), "${bezeichnung}" ${umlagekosten} CHF for [${meters.join(', ')}].`,
+                            );
                         }
-                        adapter.log.info(
-                            `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), "${bezeichnung}" ${umlagekosten} CHF for [${meters.join(', ')}].`,
-                        );
                     }
 
                     if (obj.callback) {

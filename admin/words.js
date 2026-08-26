@@ -1049,6 +1049,39 @@ systemDictionary = {
     "es": "Also: {bezeichnung} {chf} CHF/month for: {meters}",
     "pl": "Also: {bezeichnung} {chf} CHF/month for: {meters}"
   },
+  "umlagekostenIsDefault": {
+    "en": "Set as standing default (every month, no end date) instead of the range above",
+    "de": "Als Standardwert setzen (jeden Monat, ohne Enddatum) statt des Zeitraums oben",
+    "ru": "Set as standing default (every month, no end date) instead of the range above",
+    "pt": "Set as standing default (every month, no end date) instead of the range above",
+    "nl": "Set as standing default (every month, no end date) instead of the range above",
+    "fr": "Set as standing default (every month, no end date) instead of the range above",
+    "it": "Set as standing default (every month, no end date) instead of the range above",
+    "es": "Set as standing default (every month, no end date) instead of the range above",
+    "pl": "Set as standing default (every month, no end date) instead of the range above"
+  },
+  "umlagekostenIsDefaultHint": {
+    "en": "Applies to every future month automatically until changed here. An explicit entry for one specific month (e.g. via the web app) still takes precedence over this default for that one month.",
+    "de": "Gilt automatisch für jeden künftigen Monat, bis hier geändert. Ein expliziter Eintrag für einen bestimmten Monat (z.B. über die Webapp) hat für diesen einen Monat weiterhin Vorrang vor diesem Standardwert.",
+    "ru": "Applies to every future month automatically until changed here.",
+    "pt": "Applies to every future month automatically until changed here.",
+    "nl": "Applies to every future month automatically until changed here.",
+    "fr": "Applies to every future month automatically until changed here.",
+    "it": "Applies to every future month automatically until changed here.",
+    "es": "Applies to every future month automatically until changed here.",
+    "pl": "Applies to every future month automatically until changed here."
+  },
+  "umlagekostenConfirmSuffixDefault": {
+    "en": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "de": "Ausserdem: {bezeichnung} {chf} CHF/Monat als STANDARDWERT (jeden Monat) für: {meters}",
+    "ru": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "pt": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "nl": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "fr": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "it": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "es": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}",
+    "pl": "Also: {bezeichnung} {chf} CHF/month as a STANDING DEFAULT (every month) for: {meters}"
+  },
   "generateReportButton": {
     "en": "Generate current-period report now (XLSX)",
     "de": "Aktuellen Bericht jetzt erzeugen (XLSX)",
