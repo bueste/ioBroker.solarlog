@@ -565,15 +565,37 @@ systemDictionary = {
     "pl": "Enable MariaDB billing journal"
   },
   "mariadbHost": {
-    "en": "MariaDB host (use the hostname, e.g. s076.cyon.net - not the IP, or TLS certificate verification fails)",
-    "de": "MariaDB Host (Hostname verwenden, z.B. s076.cyon.net - nicht die IP, sonst schlägt die TLS-Zertifikatsprüfung fehl)",
-    "ru": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "pt": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "nl": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "fr": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "it": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "es": "MariaDB host (use the hostname, not the IP - TLS verification needs it)",
-    "pl": "MariaDB host (use the hostname, not the IP - TLS verification needs it)"
+    "en": "MariaDB host - use the real hostname (e.g. s076.cyon.net) for a direct TLS connection, or 127.0.0.1 with an SSH tunnel + \"Use SSL\" unchecked below",
+    "de": "MariaDB Host - für eine direkte TLS-Verbindung den echten Hostnamen verwenden (z.B. s076.cyon.net), oder 127.0.0.1 bei einem SSH-Tunnel + \"SSL verwenden\" unten deaktiviert",
+    "ru": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "pt": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "nl": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "fr": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "it": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "es": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel",
+    "pl": "MariaDB host - hostname for direct TLS, or 127.0.0.1 with an SSH tunnel"
+  },
+  "mariadbUseSsl": {
+    "en": "Use TLS/SSL for this connection",
+    "de": "TLS/SSL für diese Verbindung verwenden",
+    "ru": "Use TLS/SSL for this connection",
+    "pt": "Use TLS/SSL for this connection",
+    "nl": "Use TLS/SSL for this connection",
+    "fr": "Use TLS/SSL for this connection",
+    "it": "Use TLS/SSL for this connection",
+    "es": "Use TLS/SSL for this connection",
+    "pl": "Use TLS/SSL for this connection"
+  },
+  "mariadbUseSslHint": {
+    "en": "Keep checked for a direct connection to the real hostname (default, full certificate verification). Uncheck ONLY when mariadbHost is a local SSH-tunnel endpoint (127.0.0.1) - the tunnel already encrypts everything end-to-end, and a loopback address can never match the server's real certificate anyway.",
+    "de": "Angehakt lassen bei direkter Verbindung zum echten Hostnamen (Standard, volle Zertifikatsprüfung). NUR deaktivieren, wenn mariadbHost ein lokaler SSH-Tunnel-Endpunkt (127.0.0.1) ist - der Tunnel verschlüsselt bereits durchgehend, und eine Loopback-Adresse kann ohnehin nie zum echten Server-Zertifikat passen.",
+    "ru": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "pt": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "nl": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "fr": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "it": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "es": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1).",
+    "pl": "Uncheck only when using a local SSH-tunnel endpoint (127.0.0.1)."
   },
   "mariadbPort": {
     "en": "Port",

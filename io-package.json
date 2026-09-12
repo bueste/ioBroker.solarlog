@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.17",
+    "version": "2.5.18",
     "news": {
+      "2.5.18": {
+        "en": "New: optional SSH-tunnel support for the MariaDB connection (mariadbUseSsl checkbox on the Billing tab) - uncheck it when mariadbHost points at a local SSH-tunnel endpoint (127.0.0.1) instead of the real Cyon hostname. Background: direct TLS connections to Cyon had become increasingly unreliable (an IPv6 route from the adapter host had degraded), and routing through an SSH tunnel to localhost sidesteps that entirely. Existing installs are unaffected (option defaults to on = current direct-TLS behavior).",
+        "de": "Neu: optionale SSH-Tunnel-Unterstützung für die MariaDB-Verbindung (Checkbox \"mariadbUseSsl\" auf dem Billing-Tab) - deaktivieren, wenn mariadbHost auf einen lokalen SSH-Tunnel-Endpunkt (127.0.0.1) statt den echten Cyon-Hostnamen zeigt. Hintergrund: direkte TLS-Verbindungen zu Cyon waren zunehmend unzuverlässig geworden (eine IPv6-Route ab dem Adapter-Host war beeinträchtigt) - ein SSH-Tunnel auf localhost umgeht das vollständig. Bestehende Installationen sind unverändert (Option ist standardmässig aktiv = bisheriges Direkt-TLS-Verhalten).",
+        "ru": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "pt": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "nl": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "fr": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "it": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "es": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint.",
+        "pl": "New: optional SSH-tunnel support for the MariaDB connection - uncheck mariadbUseSsl when using a local tunnel endpoint."
+      },
       "2.5.13": {
         "en": "Security fix: the MariaDB connection now uses FULL TLS certificate chain and hostname verification (was: encryption without verification, since 2.5.7). The server's certificate was misdiagnosed as self-signed earlier - it's actually a properly CA-issued certificate (GlobalSign, *.cyon.net); the earlier failure was simply connecting via the raw IP address, which can never match a hostname-pattern certificate. mariadbHost must now be the *.cyon.net hostname, not the IP - already updated on this instance.",
         "de": "Sicherheits-Fix: Die MariaDB-Verbindung nutzt jetzt VOLLSTÄNDIGE TLS-Zertifikatsketten- und Hostnamen-Prüfung (vorher: Verschlüsselung ohne Prüfung, seit 2.5.7). Das Server-Zertifikat war fälschlicherweise als selbstsigniert eingestuft worden - tatsächlich ist es ein korrekt CA-signiertes Zertifikat (GlobalSign, *.cyon.net); der frühere Fehler kam schlicht daher, dass über die rohe IP-Adresse verbunden wurde, die nie zu einem Hostnamen-Zertifikat passen kann. mariadbHost muss jetzt der *.cyon.net-Hostname sein, nicht die IP - auf dieser Instanz bereits angepasst.",
@@ -304,6 +315,7 @@
     "mariadbUser": "",
     "mariadbPassword": "",
     "mariadbDatabase": "",
+    "mariadbUseSsl": true,
     "reportEnabled": false,
     "reportRecipient": "",
     "reportCc": "",

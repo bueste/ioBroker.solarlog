@@ -1144,6 +1144,16 @@ async function ensureMariaDbPool() {
         return;
     }
     try {
+        // mariadbUseSsl defaults to true (undefined -> true) so every existing install
+        // that predates this option keeps its current direct-TLS behavior unchanged.
+        // Set to false when mariadbHost is a local SSH-tunnel endpoint (127.0.0.1) - see
+        // docs/ARCHITECTURE.md "MariaDB via SSH-Tunnel" for when/why: the tunnel already
+        // encrypts everything end-to-end, a loopback address can never match the server's
+        // *.cyon.net certificate CN, and testing showed Cyon's MariaDB actually REQUIRES a
+        // real TLS handshake on port 3306 even for local 127.0.0.1 connections - so this
+        // is a deliberate two-state switch (full TLS+hostname-verification XOR none),
+        // never a half-measure of TLS-without-verification against a real remote host.
+        const useSsl = adapter.config.mariadbUseSsl !== false;
         mariadbPool = mariadb.createPool({
             host: adapter.config.mariadbHost,
             port: Number(adapter.config.mariadbPort) || 3306,
@@ -1157,7 +1167,7 @@ async function ensureMariaDbPool() {
             // (149.126.4.85) can never match a hostname-pattern certificate's CN. Using
             // the *.cyon.net hostname in mariadbHost instead of the IP is what makes this
             // work; falling back to an IP here would silently break verification again.
-            ssl: { rejectUnauthorized: true },
+            ...(useSsl ? { ssl: { rejectUnauthorized: true } } : {}),
         });
         // A connection pool is an EventEmitter - an unhandled 'error' event (e.g. the DB
         // dropping an idle connection in the background, unrelated to any single query)
