@@ -284,12 +284,113 @@ Three ways to get one:
 
 | Area | Measure |
 |---|---|
-| DB transport | Full TLS certificate chain + hostname verification (`ssl: { rejectUnauthorized: true }`, since 2.5.13). The server presents a properly CA-issued certificate (GlobalSign, `*.cyon.net`) — it was briefly misdiagnosed as self-signed because connecting via the raw IP can never match a hostname-pattern cert's CN; using the `*.cyon.net` hostname in `mariadbHost` instead of the IP is what makes full verification work. |
+| DB transport | Full TLS certificate chain + hostname verification (`ssl: { rejectUnauthorized: true }`, since 2.5.13), OR a local SSH tunnel with TLS off (`mariadbUseSsl: false`, since 2.5.18) — see "MariaDB via SSH tunnel" below. The direct-TLS path needs the `*.cyon.net` hostname in `mariadbHost`, not the IP, or hostname verification fails (it was briefly misdiagnosed as self-signed for exactly that reason). |
 | Credentials | `mariadbPassword` is `encryptedNative` + `protectedNative`; never logged. |
 | SQL | 100% parameterized queries (`lib/db.js`), no string interpolation of any input. |
 | Admin UI | No `.html()`/`innerHTML` usage — all dynamic output goes through `.text()`. |
 | Input validation | DB host (IPv4 w/ real octet ranges, or FQDN with a dot), recipient e-mail (typed field + regex), e-mail instance (existence + alive check before every send). |
 | Dependencies | `npm audit fix` (non-breaking) applied for axios/form-data/brace-expansion. A larger set of transitive vulnerabilities (uuid/exceljs/googleapis, the latter used by an unrelated adapter on this shared host) needs `--force` and was deliberately left for a separate, explicitly-approved maintenance pass. |
+
+## MariaDB via SSH tunnel (since 2.5.18)
+
+The direct TLS connection to Cyon (`mariadbHost: s076.cyon.net`) had become
+increasingly unreliable starting around 2026-09-05 and escalating sharply on
+2026-09-09/10 (897 and 1093 failed connection attempts those two days, vs.
+~580/day the week before) — bad enough that the nightly accumulation
+(23:58) silently missed **two consecutive days entirely** (2026-09-10 and
+2026-09-11 have no `meter_daily`/`building_daily` rows at all; see "Known
+data gaps" below).
+
+**Root cause**: a broken/degraded IPv6 route from the adapter host
+(`10.195.30.116`) to `s076.cyon.net`. DNS for that hostname resolves to both
+an IPv6 and an IPv4 address; the `mariadb` Node driver (like most TCP
+clients) tries the addresses in the order returned and doesn't fall back to
+IPv4 quickly, so a bad IPv6 path causes the whole connection attempt to hang
+or fail instead of just skipping to the working IPv4 address. Confirmed by
+reproducing the exact same behavior with plain `ssh` to the same host
+(`ssh swisslin@s076.cyon.net` hung; `ssh -4 swisslin@s076.cyon.net`
+connected instantly).
+
+**Fix**: route the MariaDB connection through an SSH tunnel instead of
+connecting directly, forcing IPv4 for the tunnel's own connection (sidesteps
+the broken IPv6 path entirely, independent of whatever eventually gets that
+route fixed on Cyon's or the ISP's end).
+
+```
+ioBroker host (10.195.30.116)                    Cyon (s076.cyon.net)
+┌─────────────────────────────┐                  ┌───────────────────────┐
+│ solarlog.0 adapter            │                  │                         │
+│  mariadbHost=127.0.0.1        │                  │  MariaDB               │
+│  mariadbPort=33066            │                  │  127.0.0.1:3306        │
+│  mariadbUseSsl=false          │                  │  (localhost-only)      │
+│         │                      │                  │        ▲                │
+│         ▼                      │   SSH, IPv4      │        │                │
+│  127.0.0.1:33066 ◀────────────┼──── forced (-4) ──┼────────┘                │
+│  systemd: mariadb-tunnel-cyon  │   encrypted        (swisslin, restricted    │
+│           .service             │   end-to-end        key: forwarding-only)  │
+└─────────────────────────────┘                  └───────────────────────┘
+```
+
+**systemd unit** (`/etc/systemd/system/mariadb-tunnel-cyon.service` on the
+adapter host, not part of this repo — infrastructure, not adapter code):
+
+```ini
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ssh -4 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
+  -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new \
+  -L 127.0.0.1:33066:127.0.0.1:3306 swisslin@s076.cyon.net
+Restart=always
+RestartSec=5
+```
+
+`-4` is not optional — dropping it reproduces the original hang. `Restart=always`
+gives resilience without needing `autossh` (not installed, and unnecessary here).
+
+**SSH key**: a dedicated ed25519 key for `root@10.195.30.116`, added to
+`swisslin@s076.cyon.net`'s `authorized_keys` with:
+
+```
+command="echo Port-forwarding-only; exit",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="127.0.0.1:3306"
+```
+
+This key can **only** forward to `127.0.0.1:3306` on Cyon — no shell, no
+other port, no access to the other sites hosted under the same `swisslin`
+account. (Pitfall hit while setting this up: OpenSSH's shorthand keyword is
+`restrict`, not `restricted` — a typo'd option name isn't rejected with an
+error, it just silently makes the whole key line unparseable, causing a
+generic "Permission denied" with no clue why. And `restrict` alone disables
+port-forwarding entirely; `permitopen=` only NARROWS an already-enabled
+forward, it doesn't grant one — so `restrict` and `permitopen` together
+without also re-enabling forwarding is a second way to end up silently
+blocked. Used neither: the explicit `no-agent-forwarding,no-X11-forwarding,
+no-pty` list plus `permitopen` achieves the same restriction without either
+trap.)
+
+**Why `mariadbUseSsl: false` for the tunnel, not just "SSL without hostname
+verification"**: two things rule out a middle ground. A loopback address can
+never match the server's real `*.cyon.net` certificate, so hostname
+verification is a non-starter regardless. And Cyon's MariaDB was found to
+**require** a real TLS handshake even for a plain TCP connection to
+`127.0.0.1:3306` — a non-TLS connection attempt is accepted at the TCP level
+but then closed without ever sending the initial handshake packet
+(`ERROR 2013: Lost connection ... at 'handshake: reading initial
+communication packet'`). Since the SSH tunnel already encrypts the traffic
+end-to-end, the correct setting is TLS off entirely for the tunnel, full
+TLS+verification for anything else — never a half-measure of one without the
+other.
+
+### Known data gaps
+
+`meter_daily`/`building_daily` have **no rows for 2026-09-10 and
+2026-09-11** — the nightly accumulation ran into the dead MariaDB connection
+on both nights. Not backfilled as of the SSH-tunnel fix (2026-09-12);
+whether/how to reconstruct those two days from the Solar-Log device's own
+31-day rolling raw history (see the 2026-08 backfill precedent — same
+mechanism, same caveats about not summing individual inverter registers) is
+a decision for whoever's handling billing for that period, not something to
+do silently.
 
 ## Admin configuration reference
 
@@ -298,6 +399,7 @@ All fields live on the **Billing** tab of the instance settings.
 | Field | Purpose |
 |---|---|
 | MariaDB host/port/user/password/database | DB connection; "Test connection" verifies live |
+| `mariadbUseSsl` (since 2.5.18) | Uncheck only when `mariadbHost` is a local SSH-tunnel endpoint (`127.0.0.1`) — see "MariaDB via SSH tunnel" above |
 | `Tarif.default.*`, `Tarif.<year>.<month>.*` | Editable in the object tree; per-month overrides the default |
 | Report recipient / e-mail instance | Validated e-mail field + instance existence check |
 | Report schedule / cutoff day | monthly/quarterly/yearly, day 1–31 |

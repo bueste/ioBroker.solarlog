@@ -27,9 +27,9 @@ ioBroker-Adapter hat damit nichts zu tun, weder beim Speichern noch beim Prüfen
 ```
 ┌───────────────────────────┐        ┌──────────────────────────────┐        ┌─────────────────────────────┐
 │  ioBroker.solarlog          │        │   MariaDB (Cyon,               │        │   Webapp (PHP 8.3,             │
-│  (lokal, 10.195.30.116)     │──TLS──▶│   s076.cyon.net)               │◀──TLS──│   abr.bronnenhuber.ch)        │
-│  - Solar-Log Polling        │  write │   - meter_daily                 │  read/ │   - Login/Sessions/TOTP       │
-│  - Nächtl. Akkumulation     │        │   - building_daily              │  write │   - Mieterverwaltung          │
+│  (lokal, 10.195.30.116)     │─SSH───▶│   s076.cyon.net)               │◀──TLS──│   abr.bronnenhuber.ch)        │
+│  - Solar-Log Polling        │ Tunnel │   - meter_daily                 │  read/ │   - Login/Sessions/TOTP       │
+│  - Nächtl. Akkumulation     │ (s.u.) │   - building_daily              │  write │   - Mieterverwaltung          │
 │  - Tarif-Bulk-Set (Admin)   │        │   - tariff_schedule              │        │   - Tarif-/Umlagekostenpflege │
 │  - lokaler Fallback ohne    │        │   - meter_umlagekosten           │        │   - Dynamische Auswertungen   │
 │    MariaDB möglich          │        │   - meter_yearly_historic        │        │   - XLSX-Export & Abo-Mails    │
@@ -46,6 +46,16 @@ kein separates Sync-Protokoll:
 - `mariadbEnabled = true` (heutiger Zustand) → Adapter schreibt zusätzlich in die
   gemeinsame MariaDB. **Die Datenbank selbst ist die Synchronisationsschicht** — die
   Webapp liest/schreibt dieselbe DB direkt, kein API-Layer dazwischen.
+
+**Adapter-Seite seit 2.5.18 per SSH-Tunnel statt direktem TLS** (Webapp-Seite unverändert
+per direktem TLS): eine über eine Woche eskalierende Instabilität der direkten
+TLS-Verbindung (defekte IPv6-Route ab dem Adapter-Host, siehe
+[BILLING.md](BILLING.md#mariadb-via-ssh-tunnel-since-2518) für die volle Diagnose) hat dabei
+am 10./11.09.2026 zwei komplette Tage im Abrechnungsjournal gekostet. Systemd-Service
+`mariadb-tunnel-cyon.service` auf dem Adapter-Host tunnelt `127.0.0.1:33066` zu Cyons
+`127.0.0.1:3306`, mit einem auf reines Port-Forwarding beschränkten SSH-Key (kein
+Shell-Zugriff auf den `swisslin`-Account, der auch die anderen Cyon-Sites des Nutzers
+bedient).
 
 ## Schema-Eigentümerschaft
 
