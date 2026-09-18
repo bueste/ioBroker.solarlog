@@ -383,14 +383,76 @@ other.
 
 ### Known data gaps
 
-`meter_daily`/`building_daily` have **no rows for 2026-09-10 and
-2026-09-11** — the nightly accumulation ran into the dead MariaDB connection
-on both nights. Not backfilled as of the SSH-tunnel fix (2026-09-12);
-whether/how to reconstruct those two days from the Solar-Log device's own
-31-day rolling raw history (see the 2026-08 backfill precedent — same
-mechanism, same caveats about not summing individual inverter registers) is
-a decision for whoever's handling billing for that period, not something to
-do silently.
+`meter_daily`/`building_daily` have **no rows for 2026-09-10, 2026-09-11,
+2026-09-13, 2026-09-14, 2026-09-15, 2026-09-16, and 2026-09-17** — the first
+two from the dead MariaDB connection (see above), the remaining five from a
+second, unrelated incident (see next section) where the installed adapter
+was silently replaced with the unmodified upstream package for almost a
+week. Not backfilled as of 2026-09-18; whether/how to reconstruct these days
+from the Solar-Log device's own 31-day rolling raw history (see the 2026-08
+backfill precedent — same mechanism, same caveats about not summing
+individual inverter registers) is a decision for whoever's handling billing
+for that period, not something to do silently. Note the 31-day window means
+2026-09-10/11 are close to aging out of the device's own history if a
+backfill is wanted.
+
+## Deployment identity: why this MUST be a non-npm (git) install
+
+**Incident, 2026-09-13 to 2026-09-18**: this fork and the public
+`iobroker-community-adapters/ioBroker.solarlog` package share the exact same
+npm package name (`iobroker.solarlog`) — nothing at the filesystem or
+ioBroker-object level distinguished "this specific fork with billing
+features" from "the generic upstream monitor". Someone (most likely another
+person with Admin access to this shared ioBroker instance — the host VM
+belongs to a co-owner of the property, not solely to whoever maintains the
+billing side) used ioBroker Admin's adapter list to "update" or "reinstall"
+solarlog, which silently `npm install`ed the real published package (v2.4.0,
+by the original author) over this fork's files. The replacement adapter has
+none of the billing code (no `lib/`, no MariaDB, no `Tarif.*`/`Database.*`
+states) but keeps the same instance ID, so nothing *looked* broken — Solar-Log
+polling, live states, Grafana/InfluxDB all kept working normally. Only the
+billing pipeline silently stopped, discovered five days later purely because
+`meter_daily` had no new rows.
+
+**Fix**: install as a genuine git-based ("non-npm") adapter instead of a
+manually-copied or plain-npm-name install, so js-controller's own host log
+and object metadata always show the true source:
+
+```
+instance system.adapter.solarlog.0 in version "2.5.19"
+  (non-npm: git@github.com:bueste/ioBroker.solarlog.git#feature/installer-login-and-monthly-consumption)
+```
+
+```bash
+iobroker url 'git@github.com:bueste/ioBroker.solarlog.git#feature/installer-login-and-monthly-consumption' solarlog
+```
+
+Requires a repo-scoped SSH deploy key (write-enabled) for
+`github.com/bueste/ioBroker.solarlog`, configured for `root` on the adapter
+host via `~/.ssh/config` (`IdentityFile`/`IdentitiesOnly yes` pinned to that
+one key, so it's never used for anything beyond this one repo). A previous
+attempt using a local filesystem path (`iobroker url /opt/dev/iobroker.solarlog
+solarlog`) failed with `CANNOT_FIND_ADAPTER_DIR` — npm installs a local path
+as a symlink rather than a copy, and js-controller doesn't resolve that
+correctly; a real git URL avoids the symlink entirely and is also more
+correct (the running code is a byte-for-byte pinned checkout, not a live
+pointer into a `root`-owned dev directory two other people can also write to).
+
+**A real bug this surfaced**: `package.json`'s `"files"` allowlist never
+included `lib/` (an oversight from when the module was split out of
+`main.js`) — irrelevant for a manual file-copy deploy (which ignores that
+field entirely), but a genuine `npm`/git install respects it strictly, so
+the *first* git-install attempt silently produced an adapter with `main.js`
+but no `lib/db.js`/`lib/report.js`/etc. at all. Fixed in 2.5.19 alongside
+correcting `repository.url` (was still pointing at the upstream project).
+
+**This is now the only supported deploy path going forward** — a manual
+`cp` from `/opt/dev/iobroker.solarlog` still works for quick local testing,
+but the AUTHORITATIVE live install must be re-applied via the `iobroker url`
+command above after every change that should reach production, or the
+non-npm provenance metadata (and the protection it provides) is lost again.
+`common.automaticUpgrade` is additionally set to `"none"` on the instance as
+a second, independent layer of defense.
 
 ## Admin configuration reference
 
