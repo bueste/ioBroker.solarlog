@@ -1,6 +1,6 @@
 {
   "name": "iobroker.solarlog",
-  "version": "2.5.18",
+  "version": "2.5.19",
   "description": "solarlog",
   "author": "Marcel Adam <marceladam@gmx.ch>",
   "contributors": [
@@ -45,13 +45,14 @@
   "files": [
     "admin/",
     "docs/",
+    "lib/",
     "main.js",
     "LICENSE",
     "io-package.json"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iobroker-community-adapters/ioBroker.solarlog.git"
+    "url": "git+https://github.com/bueste/ioBroker.solarlog.git"
   },
   "scripts": {
     "test:js": "mocha --config test/mocharc.custom.json \"{!(node_modules|test)/**/*.test.js,*.test.js,test/**/test!(PackageFiles|Startup).js}\"",

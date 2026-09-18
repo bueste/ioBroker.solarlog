@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.18",
+    "version": "2.5.19",
     "news": {
+      "2.5.19": {
+        "en": "Fix: package.json \"files\" list was missing lib/ - installing via a real npm/git install (e.g. iobroker url) silently dropped the entire lib/ directory (db.js, report.js, billing.js, ...), breaking every billing feature with no error message. Manual file-copy deploys were never affected. Also corrected the repository URL to point at this fork instead of the upstream community adapter.",
+        "de": "Fix: In der package.json-Datei fehlte lib/ in der \"files\"-Liste - eine Installation ueber einen echten npm/git-Install (z.B. iobroker url) liess dadurch den kompletten lib/-Ordner (db.js, report.js, billing.js, ...) stillschweigend weg, was jede Abrechnungsfunktion ohne Fehlermeldung lahmlegte. Manuelle Datei-Kopier-Deployments waren davon nie betroffen. Ausserdem die repository-URL korrigiert, damit sie auf diesen Fork statt den Upstream-Community-Adapter zeigt.",
+        "ru": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "pt": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "nl": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "fr": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "it": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "es": "Fix: package.json files list was missing lib/, breaking real npm/git installs.",
+        "pl": "Fix: package.json files list was missing lib/, breaking real npm/git installs."
+      },
       "2.5.18": {
         "en": "New: optional SSH-tunnel support for the MariaDB connection (mariadbUseSsl checkbox on the Billing tab) - uncheck it when mariadbHost points at a local SSH-tunnel endpoint (127.0.0.1) instead of the real Cyon hostname. Background: direct TLS connections to Cyon had become increasingly unreliable (an IPv6 route from the adapter host had degraded), and routing through an SSH tunnel to localhost sidesteps that entirely. Existing installs are unaffected (option defaults to on = current direct-TLS behavior).",
         "de": "Neu: optionale SSH-Tunnel-Unterstützung für die MariaDB-Verbindung (Checkbox \"mariadbUseSsl\" auf dem Billing-Tab) - deaktivieren, wenn mariadbHost auf einen lokalen SSH-Tunnel-Endpunkt (127.0.0.1) statt den echten Cyon-Hostnamen zeigt. Hintergrund: direkte TLS-Verbindungen zu Cyon waren zunehmend unzuverlässig geworden (eine IPv6-Route ab dem Adapter-Host war beeinträchtigt) - ein SSH-Tunnel auf localhost umgeht das vollständig. Bestehende Installationen sind unverändert (Option ist standardmässig aktiv = bisheriges Direkt-TLS-Verhalten).",
