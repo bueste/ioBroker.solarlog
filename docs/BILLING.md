@@ -601,3 +601,34 @@ All fields live on the **Billing** tab of the instance settings.
 | Report schedule / cutoff day | monthly/quarterly/yearly, day 1–31 |
 | "Generate current-period report now" | Immediate XLSX + download link |
 | "Send test e-mail" | Exercises the full send path against the current config |
+
+## Tariffs, data quality and report delivery (2.5.22 and 2.5.23)
+
+**Tariff per calendar month.** The tariff in `tariff_schedule` (set in the web app under
+"Tarife") is authoritative for the whole calendar month: reports (adapter and web app) and all
+CHF sums in the web app use it, also for nights that were written earlier and for past months.
+A month without an entry keeps the tariff stored in its `meter_daily` rows (the value of the
+night it was written), and the adapter logs a warning every night while no tariff is set for the
+current month. The tariffs 0.28 CHF/kWh (Netzbezug) and 0.20 CHF/kWh (Solarbezug) were set
+explicitly for 2026-08 to 2026-12 on 2026-10-01. The audit log of a tariff change contains the
+previous value.
+
+**Data quality.** `meter_daily.datenqualitaet` and `building_daily.datenqualitaet` are `ok` or
+`veraltet`. The nightly run (23:58) sets `veraltet` when the last successful Solar-Log poll is
+older than 30 minutes (`lib/billing.js deviceDataQuality()`): the values then come from before
+the outage and the day is understated. The row is still written, an error is logged, reports name
+such days and the web app shows a banner. Rows from before 2.5.23 and backfilled rows are `ok`.
+A billable meter without a `daysum` value is logged as an error.
+
+**Incomplete periods.** `periodCoverage()` (adapter) and `ReportMail::coverageWarning()` (web
+app) list days for which at least one billable meter has no row, plus the `veraltet` days. The
+report is still sent but carries `[UNVOLLSTAENDIG]` in the subject and a warning at the top of
+the text. If the nightly run of a day is missing altogether, an error is logged at 00:10 and at
+startup (`checkMissedNight()`); the day can be recovered with `tools/backfill-from-influx.js`.
+
+**Report retry.** The scheduled report job runs every hour at :10. A due report is registered as
+pending in the state `Export.reportState` (`lib/reportQueue.js`) and is sent as soon as MariaDB
+and the e-mail instance are available; it is retried for up to 7 days, then given up with an error
+log. A sent report is remembered (`lastKey`) so it is not sent twice. On the first run of a version
+that has this state, the report due that day counts as already sent. The web app's subscription
+cron behaves the same way: the period is only marked as sent after a successful delivery.
