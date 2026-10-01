@@ -517,6 +517,19 @@ typed at a hidden prompt and passed on stdin, never as an argument or stored in
 the repository. The old database should be dropped in the Cyon panel after a
 few days.
 
+**Done 2026-10-01 19:25.** All 10 tables copied with identical row counts and
+checksums (`meter_daily` 416 rows, `building_daily` 52, sums of CHF/kWh equal),
+web app and adapter run on `swisslin_solarlog`. Backups on Cyon: the SQL dump
+`~/solarlog_db_dump_20261001-192513.sql` and
+`private/config.php.bak-before-solarlog-db-20261001-192513` (both contain the
+old state; delete after a few days, the config backup holds the old
+password). On the VM: `/root/solarlog-adapter-db-config-backup-20261001-192516.json`.
+The first attempt the same evening failed (empty dump) because the password of
+the old database had been rotated while the web app config still held the old
+one; the script now asks for the current old password at a second hidden
+prompt. For the minutes in between the adapter buffered nothing (no night run
+was due) and the web app had no database.
+
 ## Deployment identity: why this MUST be a non-npm (git) install
 
 **Incident, 2026-09-13 to 2026-09-18**: this fork and the public
