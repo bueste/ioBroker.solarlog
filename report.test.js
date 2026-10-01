@@ -328,3 +328,36 @@ describe('periodCoverage', () => {
         expect(text).to.include('15-09-2026');
     });
 });
+
+describe('aggregateMeterRowsByMonth with tariff_schedule', () => {
+    const rows = [
+        dailyRow({ reading_date: '2026-09-01', solarbezug_kwh: '6', netzbezug_kwh: '4', tarif_solar: '0.2', tarif_netz: '0.28' }),
+        dailyRow({ reading_date: '2026-09-02', solarbezug_kwh: '6', netzbezug_kwh: '4', tarif_solar: '0.2', tarif_netz: '0.28' }),
+    ];
+
+    it('uses the tariff of tariff_schedule for the whole month, not the one stored in the daily rows (a tariff set after the nights were written must still apply)', () => {
+        const [g] = aggregateMeterRowsByMonth(rows, [], [
+            { reading_year: 2026, reading_month: 9, solarbezug_chf_kwh: '0.30', netzbezug_chf_kwh: '0.35' },
+        ]);
+        expect(g.tarifSolar).to.equal(0.3);
+        expect(g.tarifNetz).to.equal(0.35);
+        expect(g.totalChf).to.equal(6.4); // 12 kWh solar * 0.30 + 8 kWh grid * 0.35
+    });
+
+    it('keeps the stored daily tariff for a month that has no tariff_schedule entry', () => {
+        const [g] = aggregateMeterRowsByMonth(rows, [], [
+            { reading_year: 2026, reading_month: 8, solarbezug_chf_kwh: '0.99', netzbezug_chf_kwh: '0.99' },
+        ]);
+        expect(g.tarifSolar).to.equal(0.2);
+        expect(g.totalChf).to.equal(4.64); // 12 * 0.20 + 8 * 0.28
+    });
+
+    it('applies each month its own scheduled tariff', () => {
+        const mixed = [...rows, dailyRow({ reading_date: '2026-10-01', solarbezug_kwh: '10', netzbezug_kwh: '0' })];
+        const out = aggregateMeterRowsByMonth(mixed, [], [
+            { reading_year: 2026, reading_month: 9, solarbezug_chf_kwh: '0.30', netzbezug_chf_kwh: '0.35' },
+            { reading_year: 2026, reading_month: 10, solarbezug_chf_kwh: '0.10', netzbezug_chf_kwh: '0.40' },
+        ]);
+        expect(out.map(g => g.totalChf)).to.deep.equal([6.4, 1]);
+    });
+});

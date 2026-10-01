@@ -24,6 +24,7 @@ const {
     queryMeterPeriod,
     queryBuildingPeriod,
     queryTariffForMonth,
+    queryTariffsPeriod,
     queryMeterUmlagekostenPeriod,
 } = require('./lib/db');
 const { buildReportWorkbook, buildReportFileName, periodCoverage, coverageWarningText } = require('./lib/report');
@@ -1842,11 +1843,13 @@ async function regenerateCurrentReport() {
         const meterRows = await queryMeterPeriod(mariadbPool, fromDate, toDate);
         const buildingRows = await queryBuildingPeriod(mariadbPool, fromDate, toDate);
         const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, fromDate, toDate);
+        const tariffRows = await queryTariffsPeriod(mariadbPool, fromDate, toDate);
         const buffer = await buildReportWorkbook(
             meterRows,
             buildingRows,
             { title: `Abrechnung ${fromDate} bis ${toDate} (laufender Monat)` },
             umlagekostenRows,
+            tariffRows,
         );
 
         const fileName = `export/${buildReportFileName('manuell', `${y}-${m}`)}`;
@@ -1908,11 +1911,13 @@ async function sendScheduledReport(period) {
         const meterRows = await queryMeterPeriod(mariadbPool, period.fromDate, period.toDate);
         const buildingRows = await queryBuildingPeriod(mariadbPool, period.fromDate, period.toDate);
         const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, period.fromDate, period.toDate);
+        const tariffRows = await queryTariffsPeriod(mariadbPool, period.fromDate, period.toDate);
         const buffer = await buildReportWorkbook(
             meterRows,
             buildingRows,
             { title: `Abrechnung ${period.label}` },
             umlagekostenRows,
+            tariffRows,
         );
 
         const year = period.fromDate.slice(0, 4);

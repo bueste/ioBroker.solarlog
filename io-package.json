@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.21",
+    "version": "2.5.22",
     "news": {
+      "2.5.22": {
+        "en": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "de": "Fix: Berichte nehmen den Tarif jetzt für den ganzen Kalendermonat aus tariff_schedule statt aus der letzten Tageszeile. Ein Tarif, der nach dem Schreiben der Nächte gesetzt oder korrigiert wird (auch für vergangene Monate), gilt damit im Bericht; Monate ohne Eintrag in tariff_schedule behalten den gespeicherten Tagestarif.",
+        "ru": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "pt": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "nl": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "fr": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "it": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "es": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff.",
+        "pl": "Fix: reports now take the tariff from tariff_schedule for the whole calendar month instead of the tariff stored in the last daily row. A tariff that is set or corrected after the nights were written (also for past months) now applies to the report; months without a tariff_schedule entry keep the stored daily tariff."
+      },
       "2.5.21": {
         "en": "Fix: the buffer for nightly billing rows could lose a freshly buffered night when the 10-minute delivery job finished at the same moment (stale overwrite) - all buffer changes are now serialized. Fix: the Gebaeude sheet of the XLSX report wrote all figures as text cells (DECIMAL strings from the driver); they are numbers now, like in the web app report. New: scheduled reports for a period with missing days are marked [UNVOLLSTAENDIG] in subject and text and logged as an error. New: an error is logged at 00:10 and at startup if the nightly run of a day is missing (adapter/VM/Solar-Log was down at 23:58). New: a warning is logged whenever the default/example tariff is used because no tariff was set for the month.",
         "de": "Fix: Der Zwischenspeicher für die nächtlichen Abrechnungszeilen konnte eine frisch gepufferte Nacht verlieren, wenn der 10-Minuten-Nachliefer-Job im selben Moment endete (veraltete Kopie überschrieb sie) - alle Änderungen am Zwischenspeicher laufen jetzt nacheinander. Fix: Das Blatt Gebaeude des XLSX-Berichts schrieb alle Werte als Text (DECIMAL-Strings vom Treiber), jetzt sind es Zahlen wie im Bericht der Webapp. Neu: Geplante Berichte für einen Zeitraum mit fehlenden Tagen sind in Betreff und Text mit [UNVOLLSTAENDIG] gekennzeichnet und werden als Fehler geloggt. Neu: Fehlt der Nachtlauf eines Tages (Adapter/VM/Solar-Log war um 23:58 aus), wird um 00:10 und beim Start ein Fehler geloggt. Neu: Warnung im Log, wenn der Standard-/Beispieltarif verwendet wird, weil für den Monat kein Tarif gesetzt ist.",
@@ -213,19 +224,6 @@
         "pl": "Adapter wymaga node.js > = 20, kontroler js- i admin > = 7.6.17\nfix logowania dla oprogramowania solarlog > = 6.1.1\nZaktualizowano zależności",
         "uk": "Адаптер вимагає node.js >= 20, js-controller >= 6.0.11 і admin >= 7.6.17\nфіксація входу для прошивки solarlog >= 6.1.1 км\nЗалежність було оновлено",
         "zh-cn": "适配器需要节点.js >= 20,js控制器 6.0.11和admin >= 7.6.17\n日光记录固件的登录修正qq 6.1.1 联合国\n依赖关系已更新"
-      },
-      "2.3.0": {
-        "en": "Adapter requires node.js >= 18 and js-controller >= 5 now\nDependencies have been updated",
-        "de": "Adapter benötigt node.js >= 18 und js-controller >= 5 jetzt\nAbhängigkeiten wurden aktualisiert",
-        "ru": "Адаптер требует node.js >= 18 и js-контроллер >= 5 сейчас\nЗависимость обновлена",
-        "pt": "Adapter requer node.js >= 18 e js-controller >= 5 agora\nAs dependências foram atualizadas",
-        "nl": "Voor adaptor zijn node.js < 18 en js-controller > Nu 5\nAfhankelijkheden zijn bijgewerkt",
-        "fr": "L'adaptateur nécessite node.js >= 18 et js-controller >= 5 maintenant\nLes dépendances ont été actualisées",
-        "it": "Adattatore richiede node.js >= 18 e js-controller >= 5 ora\nLe dipendenze sono state aggiornate",
-        "es": "Adaptador requiere node.js √≥= 18 y js-controller 5 ahora\nSe han actualizado las dependencias",
-        "pl": "Adapter wymaga node.js > = 18 i kontroler js- > = 5 teraz\nZaktualizowano zależności",
-        "uk": "Адаптер вимагає node.js >= 18 і js-controller >= 5 тепер\nЗалежність було оновлено",
-        "zh-cn": "适配器需要节点.js QQ18和js控制器 QQ 现在5号\n依赖关系已更新"
       }
     },
     "titleLang": {
