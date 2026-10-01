@@ -31,6 +31,7 @@ const { determineScheduledPeriod } = require('./lib/scheduling');
 const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
 const { enumerateMonthRange } = require('./lib/tariffs');
+const { createPendingDelivery } = require('./lib/pendingDelivery');
 
 let adapter;
 
@@ -115,8 +116,11 @@ let jedeStunde;
 let jedenTag;
 let jedeNacht;
 let reportCheckJob;
+let pendingFlushJob;
 let restartTimer;
 let mariadbPool = null;
+let poolSetupInFlight = null;
+let pendingDelivery = null;
 
 let userName;
 let userPw;
@@ -146,6 +150,9 @@ function unload(callback) {
 
         reportCheckJob && reportCheckJob.cancel();
         reportCheckJob = null;
+
+        pendingFlushJob && pendingFlushJob.cancel();
+        pendingFlushJob = null;
 
         if (mariadbPool) {
             mariadbPool.end().catch(() => {});
@@ -232,6 +239,7 @@ async function main() {
         await cleanupLegacyTariffObjects();
         await ensureMariaDbPool();
         await checkDatabaseConnection();
+        await flushPendingDays();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
         numinv = 0;
@@ -374,6 +382,12 @@ async function main() {
         // Runs once/day, well after midnight so "today" has fully rolled over for the
         // cutoff-day check in lib/scheduling.js.
         reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => checkAndSendScheduledReport());
+
+        // Delivers daily rows that could not be written at the nightly run (see
+        // persistOrQueueDay()) as soon as MariaDB is reachable again, and re-establishes
+        // the pool itself if the initial connect failed - no restart or manual
+        // Database.testConnection needed.
+        pendingFlushJob = schedule.scheduleJob('*/10 * * * *', async () => flushPendingDays());
 
         if (backupAuto) {
             weeklyBackup = schedule.scheduleJob(`0 ${backupHour} * * ${backupWeekday}`, async () => {
@@ -944,7 +958,12 @@ async function accumulateMonthlyPerDevice() {
         );
 
         const meterDailyRows = [];
-        const dailyTariffs = mariadbPool
+        // Rows are built whenever MariaDB billing is enabled - NOT only while the pool is
+        // up right now - so a night with the DB unreachable still produces the rows that
+        // persistOrQueueDay() buffers and delivers later. getTariffsForMonth() falls back
+        // to the ioBroker tariff states by itself when there is no pool.
+        const dbEnabled = !!adapter.config.mariadbEnabled;
+        const dailyTariffs = dbEnabled
             ? await getTariffsForMonth(String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'))
             : null;
 
@@ -975,7 +994,7 @@ async function accumulateMonthlyPerDevice() {
             const zaehlerstandNachher = zaehlerstandVorher + daysum;
             await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
 
-            if (billable && mariadbPool && dailyTariffs) {
+            if (billable && dbEnabled && dailyTariffs) {
                 meterDailyRows.push(
                     buildMeterDailyRow({
                         date: todayStr,
@@ -1076,27 +1095,18 @@ async function accumulateMonthlyPerDevice() {
         // to re-run and double-count them.
         await adapter.setStateAsync('Database.lastAccumulatedDate', todayStr, true);
 
-        if (mariadbPool) {
-            try {
-                await upsertMeterDaily(mariadbPool, meterDailyRows);
-                const buildingRow = buildBuildingDailyRow({
-                    date: todayStr,
-                    produktionKwh: yieldWh / 1000,
-                    verbrauchKwh: consWh / 1000,
-                    einspeisungKwh: einspeisungWh / 1000,
-                    selbstverbrauchtKwh: (consWh * ratio) / 1000,
-                    berechnungsmethode,
-                });
-                await upsertBuildingDaily(mariadbPool, buildingRow);
-                adapter.log.info(
-                    `MariaDB: wrote ${meterDailyRows.length} meter_daily row(s) + 1 building_daily row for ${todayStr}`,
-                );
-                await regenerateCurrentReport();
-            } catch (e) {
-                // ioBroker states above are already updated regardless - a DB hiccup only
-                // delays persistence/reporting, it never blocks the live/monthly states.
-                adapter.log.warn(`MariaDB write failed for ${todayStr} (non-fatal): ${e.message}`);
-            }
+        if (dbEnabled) {
+            const buildingRow = buildBuildingDailyRow({
+                date: todayStr,
+                produktionKwh: yieldWh / 1000,
+                verbrauchKwh: consWh / 1000,
+                einspeisungKwh: einspeisungWh / 1000,
+                selbstverbrauchtKwh: (consWh * ratio) / 1000,
+                berechnungsmethode,
+            });
+            // ioBroker states above are already updated regardless - a DB problem only
+            // delays persistence/reporting, it never blocks the live/monthly states.
+            await persistOrQueueDay(todayStr, meterDailyRows, buildingRow);
         }
     } catch (e) {
         adapter.log.warn(`accumulateMonthlyPerDevice - Error: ${e.message}`);
@@ -1143,6 +1153,22 @@ async function ensureMariaDbPool() {
         adapter.log.debug('MariaDB is disabled in the instance configuration - billing DB features are inactive.');
         return;
     }
+    if (mariadbPool) {
+        return;
+    }
+    // Several callers can ask at the same time (startup, the 10-minute delivery job, the
+    // nightly write, the Database.testConnection button) - share one in-flight attempt
+    // instead of creating parallel pools.
+    if (!poolSetupInFlight) {
+        poolSetupInFlight = setupMariaDbPool().finally(() => {
+            poolSetupInFlight = null;
+        });
+    }
+    return poolSetupInFlight;
+} // END ensureMariaDbPool
+
+async function setupMariaDbPool() {
+    let pool = null;
     try {
         // mariadbUseSsl defaults to true (undefined -> true) so every existing install
         // that predates this option keeps its current direct-TLS behavior unchanged.
@@ -1154,7 +1180,7 @@ async function ensureMariaDbPool() {
         // is a deliberate two-state switch (full TLS+hostname-verification XOR none),
         // never a half-measure of TLS-without-verification against a real remote host.
         const useSsl = adapter.config.mariadbUseSsl !== false;
-        mariadbPool = mariadb.createPool({
+        pool = mariadb.createPool({
             host: adapter.config.mariadbHost,
             port: Number(adapter.config.mariadbPort) || 3306,
             user: adapter.config.mariadbUser,
@@ -1174,18 +1200,77 @@ async function ensureMariaDbPool() {
         // is treated by Node as a thrown exception and can crash the whole adapter process
         // if nothing is listening. This only logs it; individual query failures are still
         // caught at each call site below.
-        mariadbPool.on('error', e => {
+        pool.on('error', e => {
             adapter.log.warn(`MariaDB pool error (background, non-fatal): ${e.message}`);
         });
-        await ensureSchema(mariadbPool);
+        await ensureSchema(pool);
+        // Only now is the pool usable - callers checking `mariadbPool` must never see a
+        // pool whose first connection/schema check is still in flight or has failed.
+        mariadbPool = pool;
         adapter.log.info(
             'MariaDB connected, billing schema ensured (meter_daily/building_daily/meter_yearly_historic).',
         );
     } catch (e) {
-        adapter.log.error(`MariaDB setup failed - billing DB writes/reports disabled until next restart: ${e.message}`);
+        adapter.log.error(
+            `MariaDB setup failed (${e.message}) - the nightly rows are buffered locally and the connection is retried every 10 minutes.`,
+        );
         mariadbPool = null;
+        if (pool) {
+            // A failed pool keeps retrying its own connections in the background - end it so
+            // repeated attempts don't pile up dozens of orphaned pools.
+            pool.end().catch(() => {});
+        }
     }
-} // END ensureMariaDbPool
+} // END setupMariaDbPool
+
+function localDateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Offline buffer for the nightly billing rows (up to 90 days) - the logic lives in
+ * lib/pendingDelivery.js (unit-tested with fakes); this only wires it to the adapter's
+ * states, the MariaDB pool and the report generator.
+ */
+function createDelivery() {
+    return createPendingDelivery({
+        log: {
+            info: m => adapter.log.info(m),
+            warn: m => adapter.log.warn(m),
+            error: m => adapter.log.error(m),
+            debug: m => adapter.log.debug(m),
+        },
+        enabled: () => !!adapter.config.mariadbEnabled,
+        loadRaw: async () => {
+            const state = await adapter.getStateAsync('Database.pendingRows');
+            return state && typeof state.val === 'string' ? state.val : null;
+        },
+        saveRaw: async (json, count) => {
+            await adapter.setStateAsync('Database.pendingRows', json, true);
+            await adapter.setStateAsync('Database.pendingDays', count, true);
+        },
+        hasPool: () => !!mariadbPool,
+        ensurePool: ensureMariaDbPool,
+        writeDay: async (meterRows, buildingRow) => {
+            await upsertMeterDaily(mariadbPool, meterRows);
+            await upsertBuildingDaily(mariadbPool, buildingRow);
+        },
+        afterDelivery: async () => {
+            await regenerateCurrentReport();
+        },
+        today: () => localDateStr(new Date()),
+    });
+}
+
+async function persistOrQueueDay(date, meterRows, buildingRow) {
+    pendingDelivery = pendingDelivery || createDelivery();
+    return pendingDelivery.persistOrQueueDay(date, meterRows, buildingRow);
+}
+
+async function flushPendingDays() {
+    pendingDelivery = pendingDelivery || createDelivery();
+    return pendingDelivery.flushPendingDays();
+} // END flushPendingDays
 
 /**
  * Manual/on-demand connectivity check, wired to the Database.testConnection button.
@@ -1394,6 +1479,32 @@ async function ensureDatabaseObjects() {
             write: false,
             def: '',
             desc: 'Idempotency guard: accumulateMonthlyPerDevice() refuses to run again for a date already recorded here, so the running Zählerstand can never be double-counted by an accidental second run on the same day.',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.pendingDays', {
+        type: 'state',
+        common: {
+            name: 'Billing days buffered locally, waiting for MariaDB',
+            type: 'number',
+            role: 'value',
+            read: true,
+            write: false,
+            def: 0,
+            desc: 'Number of nightly billing days that could not be written to MariaDB yet and are delivered automatically once it is reachable (kept up to 90 days). Anything above 0 for more than a day means the database connection needs attention.',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.pendingRows', {
+        type: 'state',
+        common: {
+            name: 'Buffered billing rows (JSON, internal)',
+            type: 'string',
+            role: 'json',
+            read: true,
+            write: false,
+            def: '',
+            desc: 'Internal offline buffer behind Database.pendingDays: the meter_daily/building_daily rows of the buffered days as JSON. Do not edit.',
         },
         native: {},
     });

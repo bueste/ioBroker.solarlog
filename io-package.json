@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.19",
+    "version": "2.5.20",
     "news": {
+      "2.5.20": {
+        "en": "New: nightly billing rows are buffered locally when MariaDB is unreachable at 23:58 and delivered automatically (every 10 minutes, oldest first) once it is back - kept for up to 90 days, discarded with an error log only beyond that. New states Database.pendingDays / Database.pendingRows. The MariaDB connection is now re-established automatically (previously only on restart or via the test button), and failed connection attempts no longer leave orphaned pools behind. New tool tools/backfill-from-influx.js re-creates missing days from the InfluxDB history of the same device counters.",
+        "de": "Neu: Die nächtlichen Abrechnungszeilen werden lokal zwischengespeichert, wenn MariaDB um 23:58 nicht erreichbar ist, und automatisch nachgeliefert (alle 10 Minuten, älteste zuerst), sobald sie wieder da ist - bis zu 90 Tage lang, erst danach mit Fehlermeldung verworfen. Neue States Database.pendingDays / Database.pendingRows. Die MariaDB-Verbindung baut sich jetzt selbst wieder auf (vorher nur per Neustart oder Test-Button), fehlgeschlagene Verbindungsversuche hinterlassen keine verwaisten Pools mehr. Neues Werkzeug tools/backfill-from-influx.js erzeugt fehlende Tage aus der InfluxDB-Historie derselben Gerätezähler neu.",
+        "ru": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "pt": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "nl": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "fr": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "it": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "es": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later.",
+        "pl": "New: nightly billing rows are buffered locally (up to 90 days) when MariaDB is unreachable and delivered automatically later."
+      },
       "2.5.19": {
         "en": "Fix: package.json \"files\" list was missing lib/ - installing via a real npm/git install (e.g. iobroker url) silently dropped the entire lib/ directory (db.js, report.js, billing.js, ...), breaking every billing feature with no error message. Manual file-copy deploys were never affected. Also corrected the repository URL to point at this fork instead of the upstream community adapter.",
         "de": "Fix: In der package.json-Datei fehlte lib/ in der \"files\"-Liste - eine Installation ueber einen echten npm/git-Install (z.B. iobroker url) liess dadurch den kompletten lib/-Ordner (db.js, report.js, billing.js, ...) stillschweigend weg, was jede Abrechnungsfunktion ohne Fehlermeldung lahmlegte. Manuelle Datei-Kopier-Deployments waren davon nie betroffen. Ausserdem die repository-URL korrigiert, damit sie auf diesen Fork statt den Upstream-Community-Adapter zeigt.",
