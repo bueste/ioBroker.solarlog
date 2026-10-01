@@ -20,7 +20,7 @@ Reset-Tokens sind gehasht, einmalig und befristet, der letzte Admin ist geschüt
 Adapter sind verschlüsselt (`encryptedNative`), die Schreibvorgänge in die Datenbank sind idempotent.
 
 Die gravierendsten Probleme liegen nicht in der Technik der Seiten, sondern in der **Abrechnungslogik**:
-Tarife wirken nicht rückwirkend (O-01), Berichte können unvollständig als vollständig erscheinen
+Tarife wirkten nicht rückwirkend (F-13, behoben), Berichte konnten unvollständig als vollständig erscheinen
 (behoben, F-09) und der Beispieltarif wurde bisher stillschweigend verrechnet (F-11).
 
 ## Behoben
@@ -37,30 +37,19 @@ Tarife wirken nicht rückwirkend (O-01), Berichte können unvollständig als vol
 | F-08 | niedrig | Ein Konto mit Pflicht-TOTP konnte TOTP selbst wieder abschalten. | Bei `totp_required` nicht deaktivierbar. |
 | F-09 | hoch | Berichte für Zeiträume mit fehlenden Tagen sahen vollständig aus. Der am 01.10. versendete Septemberbericht enthielt nur 15 Tage im Blatt `Gebaeude`. | Adapter und Webapp kennzeichnen solche Berichte mit `[UNVOLLSTAENDIG]` in Betreff und Text (inklusive Liste der Tage) und der Adapter loggt einen Fehler. Geprüft wird pro Zähler, nicht nur pro Tag. |
 | F-10 | mittel | Fällt der Nachtlauf (23:58) aus, weil Adapter, VM oder Solar-Log aus waren, entsteht keine Zeile und niemand erfährt es. Der Puffer greift erst nach dem Bauen der Zeile. | Fehlermeldung im Log um 00:10 und beim Start, wenn der Vortag fehlt. Erkennung, keine automatische Reparatur. Wiederherstellung per `tools/backfill-from-influx.js`. |
-| F-11 | hoch | Es wurde nie ein echter Tarif gesetzt: `tariff_schedule` enthielt nur eine Test-Zeile. Alle Tage seit 10.08. wurden mit dem eingebauten Beispieltarif 0.28 / 0.20 CHF/kWh verrechnet, ohne Hinweis. | Der Adapter loggt jede Nacht eine Warnung, solange für den Monat kein Tarif gesetzt ist. **Der Eigentümer muss die echten Tarife eintragen, siehe aber O-01.** |
+| F-11 | hoch | Es wurde nie ein echter Tarif gesetzt: `tariff_schedule` enthielt nur eine Test-Zeile. Alle Tage seit 10.08. wurden mit dem eingebauten Beispieltarif 0.28 / 0.20 CHF/kWh verrechnet, ohne Hinweis. | Der Adapter loggt jede Nacht eine Warnung, solange für den Monat kein Tarif gesetzt ist. **Der Eigentümer muss die echten Tarife eintragen, das wirkt seit F-13 auch rückwirkend.** |
 | F-12 | niedrig | Kleinere Härtungen: `JSON_HEX_*` beim Einbetten der TOTP-URI in ein Script, abgelehntes `ensurePool()` bricht die Nacht nicht mehr ab, ein unlesbarer Puffer wird als Fehler geloggt statt stillschweigend geleert. | Umgesetzt. |
+| F-13 | hoch | Tarifänderungen wirkten nicht rückwirkend (ehemals O-01). Die Tageszeilen speichern den Tarif des Schreibtags, Berichte nahmen den der letzten Zeile für den ganzen Monat. Ein nach Monatsende gesetzter Tarif änderte den Bericht nicht, ein mitten im Monat gesetzter galt im Bericht für den ganzen Monat, auf dem Bildschirm nur ab diesem Tag. | Der Tarif aus `tariff_schedule` gilt für den ganzen Kalendermonat, in den Berichten beider Systeme und in allen CHF-Summen der Webapp. Monate ohne Eintrag behalten den Tagestarif. Adapter 2.5.22 (3 neue Tests), Webapp. Auf den echten Daten mit einem Testtarif in einer zurückgerollten Transaktion geprüft. |
+| F-14 | mittel | Dashboard und Wohnungsseite summierten die gerundeten Tagesbeträge, der Bericht rechnet aus den gerundeten Monats-kWh (ehemals O-02). September: 393.43 gegen 393.46 CHF. | Eine gemeinsame Berechnung (`Reports::energyCostByMeter()`). Zusätzlich enthält das Audit-Log einer Tarifänderung jetzt den vorherigen Wert, die Sammeländerung läuft in einer Transaktion und das Jahr ist auf 2000 bis 2100 begrenzt. |
 
-Ausgerollt: Adapter 2.5.21 (Commit a286e93, 120 Tests grün), Webapp (Commit 06334e0).
+Ausgerollt: Adapter 2.5.22 (Commit d76715b, 123 Tests grün), Webapp (Commits 06334e0 und 960d4c9).
 Die Webapp-Dateien wurden vorher gesichert (`~/webapp_backup_20261001/` auf Cyon).
 
 ## Offen
 
 ### Abrechnungslogik
 
-**O-01 (hoch): Tarifänderungen wirken nicht rückwirkend.** Die Tageszeilen in `meter_daily` speichern den Tarif
-des Tages, an dem sie geschrieben wurden. Berichte (Adapter und Webapp) nehmen den Tarif der **letzten** Zeile
-der Gruppe für den ganzen Monat. `Tariffs::setTariff()` und die Sammelfunktion ändern nur `tariff_schedule`.
-Folgen: Wird ein Tarif nach Monatsende gesetzt, ändert sich der Bericht dieses Monats nicht. Wird er mitten im Monat
-gesetzt, gilt er im Bericht für den ganzen Monat, auf dem Bildschirm (Summe der Tagesbeträge) aber nur ab diesem Tag.
-Das betrifft direkt F-11: Wer jetzt die echten Tarife für August und September einträgt, verändert die bereits
-geschriebenen Zeilen nicht.
-*Empfehlung:* Tarif bei der Berichterstellung aus `tariff_schedule` lesen (Zeilentarif nur als Rückfall), die
-Anzeige im Dashboard gleich berechnen, und das Ändern eines vergangenen Monats im Audit-Log mit altem und neuem Wert
-festhalten. Alternativ eine Funktion "Tarif auf Monat anwenden", die `total_chf` neu rechnet.
-
-**O-02 (mittel): Zwei verschiedene CHF-Beträge für denselben Monat.** Dashboard und Wohnungsseite summieren die
-gerundeten Tagesbeträge (`SUM(total_chf)`), der Bericht rechnet aus den gerundeten Monats-kWh. Die Differenz liegt bei
-wenigen Rappen pro Zähler und Monat. *Empfehlung:* eine gemeinsame Berechnung (siehe O-01).
+O-01 (rückwirkende Tarife) und O-02 (zwei verschiedene CHF-Beträge) sind am selben Abend behoben, siehe F-13 und F-14.
 
 **O-03 (hoch, nur aus dem Code, nicht live nachgestellt): Veraltete Gerätewerte werden als voller Tag verbucht.**
 Der Nachtlauf liest `status.yieldday`, `status.consyieldday` und `INV.<Zähler>.daysum` ohne Prüfung, wie alt diese Werte
@@ -132,8 +121,8 @@ Datenbank selbst löscht nichts.
 
 ## Empfohlene Reihenfolge
 
-1. O-01 (rückwirkende Tarife) lösen, **dann** die echten Tarife für August und September eintragen und die Berichte neu versenden.
+1. Die echten Tarife für August und September in der Webapp eintragen (wirken jetzt rückwirkend) und die Berichte neu versenden.
 2. O-03 (veraltete Werte) und O-04 (fehlende `daysum`).
-3. O-06 (Wiederholung des Adapterberichts), O-02 (ein Rechenweg).
+3. O-06 (Wiederholung des Adapterberichts).
 4. O-07 bis O-09 (Audit und TOTP), O-11 (Sicherungen entfernen).
 5. O-18 Tests für den Nachtlauf, danach O-05.
