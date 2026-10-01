@@ -1,8 +1,19 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.20",
+    "version": "2.5.21",
     "news": {
+      "2.5.21": {
+        "en": "Fix: the buffer for nightly billing rows could lose a freshly buffered night when the 10-minute delivery job finished at the same moment (stale overwrite) - all buffer changes are now serialized. Fix: the Gebaeude sheet of the XLSX report wrote all figures as text cells (DECIMAL strings from the driver); they are numbers now, like in the web app report. New: scheduled reports for a period with missing days are marked [UNVOLLSTAENDIG] in subject and text and logged as an error. New: an error is logged at 00:10 and at startup if the nightly run of a day is missing (adapter/VM/Solar-Log was down at 23:58). New: a warning is logged whenever the default/example tariff is used because no tariff was set for the month.",
+        "de": "Fix: Der Zwischenspeicher für die nächtlichen Abrechnungszeilen konnte eine frisch gepufferte Nacht verlieren, wenn der 10-Minuten-Nachliefer-Job im selben Moment endete (veraltete Kopie überschrieb sie) - alle Änderungen am Zwischenspeicher laufen jetzt nacheinander. Fix: Das Blatt Gebaeude des XLSX-Berichts schrieb alle Werte als Text (DECIMAL-Strings vom Treiber), jetzt sind es Zahlen wie im Bericht der Webapp. Neu: Geplante Berichte für einen Zeitraum mit fehlenden Tagen sind in Betreff und Text mit [UNVOLLSTAENDIG] gekennzeichnet und werden als Fehler geloggt. Neu: Fehlt der Nachtlauf eines Tages (Adapter/VM/Solar-Log war um 23:58 aus), wird um 00:10 und beim Start ein Fehler geloggt. Neu: Warnung im Log, wenn der Standard-/Beispieltarif verwendet wird, weil für den Monat kein Tarif gesetzt ist.",
+        "ru": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "pt": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "nl": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "fr": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "it": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "es": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error.",
+        "pl": "Fix: serialized the billing-row buffer, numeric cells in the report, incomplete-report marking, missing-night error."
+      },
       "2.5.20": {
         "en": "New: nightly billing rows are buffered locally when MariaDB is unreachable at 23:58 and delivered automatically (every 10 minutes, oldest first) once it is back - kept for up to 90 days, discarded with an error log only beyond that. New states Database.pendingDays / Database.pendingRows. The MariaDB connection is now re-established automatically (previously only on restart or via the test button), and failed connection attempts no longer leave orphaned pools behind. New tool tools/backfill-from-influx.js re-creates missing days from the InfluxDB history of the same device counters.",
         "de": "Neu: Die nächtlichen Abrechnungszeilen werden lokal zwischengespeichert, wenn MariaDB um 23:58 nicht erreichbar ist, und automatisch nachgeliefert (alle 10 Minuten, älteste zuerst), sobald sie wieder da ist - bis zu 90 Tage lang, erst danach mit Fehlermeldung verworfen. Neue States Database.pendingDays / Database.pendingRows. Die MariaDB-Verbindung baut sich jetzt selbst wieder auf (vorher nur per Neustart oder Test-Button), fehlgeschlagene Verbindungsversuche hinterlassen keine verwaisten Pools mehr. Neues Werkzeug tools/backfill-from-influx.js erzeugt fehlende Tage aus der InfluxDB-Historie derselben Gerätezähler neu.",
@@ -215,19 +226,6 @@
         "pl": "Adapter wymaga node.js > = 18 i kontroler js- > = 5 teraz\nZaktualizowano zależności",
         "uk": "Адаптер вимагає node.js >= 18 і js-controller >= 5 тепер\nЗалежність було оновлено",
         "zh-cn": "适配器需要节点.js QQ18和js控制器 QQ 现在5号\n依赖关系已更新"
-      },
-      "2.2.8": {
-        "en": "ready for js-controller 5.0, enhanced error-handling, dependecies updated\n",
-        "de": "bereit für js-controller 5.0, erweiterte Fehlerbehandlung, dependencies aktualisiert\n",
-        "ru": "готов к js-controller 5.0, улучшенная обработка ошибок, обновленные зависимости\n",
-        "pt": "pronto para js-controller 5.0, manipulação de erros aprimorada, dependências atualizadas\n",
-        "nl": "quality over quantity (qoq) releases vertaling:\n",
-        "fr": "prêt pour js-controller 5.0, traitement d'erreur amélioré, les dépendances mis à jour\n",
-        "it": "pronto per js-controller 5.0, migliorata gestione degli errori, dipendenze aggiornate\n",
-        "es": "listo para js-controller 5.0, mayor manejo de errores, dependencias actualizadas\n",
-        "pl": "w zależności od aktualizacji aktualizatora 5.0, zwiększonego błędu, w zależności od aktualizacji aktualizacji\n",
-        "uk": "готовий для js-controller 5.0, розширена помилка-ручка, оновлені\n",
-        "zh-cn": "准备好供控制的p-5、加强错误处理、依赖性更新\n"
       }
     },
     "titleLang": {

@@ -218,6 +218,106 @@ describe('pendingDelivery', () => {
         expect(env.db.size).to.equal(0);
     });
 
+    it('a night buffered WHILE the delivery job is writing an older day is not lost (regression: the delivery job saved a stale copy of the buffer over it)', async () => {
+        const env = createEnv();
+        const old = rows('2026-09-29');
+        env.raw = JSON.stringify([{ date: '2026-09-29', ...old, queuedAt: '2026-09-29T21:58:00.000Z' }]);
+        // Slow write of the old day, so the nightly job runs in the middle of it.
+        let releaseWrite;
+        const slowWrite = new Promise(resolve => {
+            releaseWrite = resolve;
+        });
+        const originalSet = env.db.set.bind(env.db);
+        let writes = 0;
+        const delivery = createPendingDelivery({
+            log: { info() {}, warn() {}, error() {}, debug() {} },
+            enabled: () => true,
+            loadRaw: async () => env.raw,
+            saveRaw: async (json, count) => {
+                env.raw = json;
+                env.pendingCount = count;
+            },
+            hasPool: () => true,
+            ensurePool: async () => {},
+            writeDay: async (meterRows, buildingRow) => {
+                writes++;
+                if (writes === 1) {
+                    await slowWrite; // delivery of 2026-09-29 is in flight
+                } else {
+                    throw new Error('DB gone again'); // tonight's write fails -> must be buffered
+                }
+                originalSet(buildingRow.reading_date, { meterRows, buildingRow });
+            },
+            afterDelivery: async () => {},
+            today: () => '2026-09-30',
+        });
+
+        const flush = delivery.flushPendingDays();
+        await new Promise(resolve => setImmediate(resolve)); // let the flush reach writeDay
+        const tonight = rows('2026-09-30');
+        await delivery.persistOrQueueDay('2026-09-30', tonight.meterRows, tonight.buildingRow);
+        releaseWrite();
+        await flush;
+
+        expect(env.db.has('2026-09-29')).to.equal(true);
+        const left = JSON.parse(env.raw).map(e => e.date);
+        expect(left).to.deep.equal(['2026-09-30']);
+        expect(env.pendingCount).to.equal(1);
+    });
+
+    it('a newer re-queue of the same date survives the delivery of the older copy', async () => {
+        const env = createEnv();
+        const r = rows('2026-09-29');
+        env.raw = JSON.stringify([{ date: '2026-09-29', ...r, queuedAt: 'older' }]);
+        // While the old copy is being written, the date is re-queued (different queuedAt).
+        let first = true;
+        const delivery = createPendingDelivery({
+            log: { info() {}, warn() {}, error() {}, debug() {} },
+            enabled: () => true,
+            loadRaw: async () => env.raw,
+            saveRaw: async json => {
+                env.raw = json;
+            },
+            hasPool: () => true,
+            ensurePool: async () => {},
+            writeDay: async () => {
+                if (first) {
+                    first = false;
+                    env.raw = JSON.stringify([{ date: '2026-09-29', ...r, queuedAt: 'newer' }]);
+                }
+            },
+            afterDelivery: async () => {},
+            today: () => '2026-09-30',
+        });
+        await delivery.flushPendingDays();
+        expect(JSON.parse(env.raw).map(e => e.queuedAt)).to.deep.equal(['newer']);
+    });
+
+    it('does not throw when the reconnect attempt itself rejects - the night is buffered instead', async () => {
+        const env = createEnv();
+        env.pool = false;
+        const delivery = createPendingDelivery({
+            log: { info() {}, warn() {}, error() {}, debug() {} },
+            enabled: () => true,
+            loadRaw: async () => env.raw,
+            saveRaw: async (json, count) => {
+                env.raw = json;
+                env.pendingCount = count;
+            },
+            hasPool: () => false,
+            ensurePool: async () => {
+                throw new Error('tunnel down');
+            },
+            writeDay: async () => {},
+            afterDelivery: async () => {},
+            today: () => '2026-09-30',
+        });
+        const r = rows('2026-09-30');
+        const res = await delivery.persistOrQueueDay('2026-09-30', r.meterRows, r.buildingRow);
+        expect(res.written).to.equal(false);
+        expect(env.pendingCount).to.equal(1);
+    });
+
     it('survives a corrupt persisted buffer (treated as empty) instead of crashing the nightly run', async () => {
         const env = createEnv();
         env.raw = '{this is not json';

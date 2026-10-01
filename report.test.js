@@ -2,7 +2,13 @@
 
 const { expect } = require('chai');
 const ExcelJS = require('exceljs');
-const { buildReportWorkbook, buildReportFileName, aggregateMeterRowsByMonth } = require('./lib/report');
+const {
+    buildReportWorkbook,
+    buildReportFileName,
+    aggregateMeterRowsByMonth,
+    periodCoverage,
+    coverageWarningText,
+} = require('./lib/report');
 
 describe('buildReportFileName', () => {
     it('builds a descriptive, filesystem-safe name', () => {
@@ -235,6 +241,27 @@ describe('buildReportWorkbook', () => {
         expect(dataRow[0]).to.equal('2026-08-20');
     });
 
+    it('writes the Gebaeude figures as real numbers even when the mariadb driver hands DECIMAL columns back as strings (regression: whole sheet was text cells)', async () => {
+        const buildingRows = [
+            {
+                reading_date: '2026-09-01',
+                produktion_kwh: '32.605',
+                verbrauch_kwh: '59.312',
+                einspeisung_kwh: '12.032',
+                eigenverbrauchsquote: '0.3469',
+            },
+        ];
+        const buffer = await buildReportWorkbook([], buildingRows, {});
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const dataRow = workbook.getWorksheet('Gebaeude').getRow(2).values.slice(1);
+        expect(dataRow[0]).to.equal('2026-09-01');
+        expect(dataRow.slice(1)).to.deep.equal([32.605, 59.312, 12.032, 0.3469]);
+        for (const cell of dataRow.slice(1)) {
+            expect(cell).to.be.a('number');
+        }
+    });
+
     it('never puts a non-billable meter (WR*, Gesamt) into the Abrechnung sheet', async () => {
         const meterRows = [dailyRow({ meter_name: 'WHG 1' }), dailyRow({ meter_name: 'WR 1' })];
         const buffer = await buildReportWorkbook(meterRows, [], {});
@@ -244,5 +271,60 @@ describe('buildReportWorkbook', () => {
         // header row + 1 data row only (WR 1 dropped)
         expect(meterSheet.rowCount).to.equal(2);
         expect(meterSheet.getRow(2).getCell(3).value).to.equal('WHG 1');
+    });
+});
+
+describe('periodCoverage', () => {
+    const month = (meters, skip = {}) => {
+        const rows = [];
+        for (let d = 1; d <= 30; d++) {
+            const date = `2026-09-${String(d).padStart(2, '0')}`;
+            for (const m of meters) {
+                if (skip[m] && skip[m].includes(date)) {
+                    continue;
+                }
+                rows.push(dailyRow({ meter_name: m, reading_date: date }));
+            }
+        }
+        return rows;
+    };
+
+    it('reports a full month as complete', () => {
+        const c = periodCoverage(month(['WHG 1', 'WHG 2']), '2026-09-01', '2026-09-30');
+        expect(c).to.deep.equal({ expectedDays: 30, missingDays: [], complete: true });
+        expect(coverageWarningText(c)).to.equal('');
+    });
+
+    it('lists a day that is missing for ONE meter only (a partial night is as wrong as a missing one)', () => {
+        const c = periodCoverage(month(['WHG 1', 'WHG 2'], { 'WHG 2': ['2026-09-14'] }), '2026-09-01', '2026-09-30');
+        expect(c.complete).to.equal(false);
+        expect(c.missingDays).to.deep.equal(['2026-09-14']);
+    });
+
+    it('lists every day of the period when there is no data at all', () => {
+        const c = periodCoverage([], '2026-09-01', '2026-09-30');
+        expect(c.missingDays).to.have.length(30);
+    });
+
+    it('works with real Date objects as returned by the mariadb driver, and ignores inverters', () => {
+        const rows = month(['WHG 1']).map(r => ({
+            ...r,
+            reading_date: new Date(2026, 8, Number(r.reading_date.slice(8))),
+        }));
+        rows.push(dailyRow({ meter_name: 'WR 1', reading_date: '2026-09-01' }));
+        expect(periodCoverage(rows, '2026-09-01', '2026-09-30').complete).to.equal(true);
+    });
+
+    it('counts calendar days correctly across a DST change', () => {
+        expect(periodCoverage([], '2026-10-24', '2026-10-27').expectedDays).to.equal(4);
+    });
+
+    it('produces a clear German warning naming the missing days', () => {
+        const c = periodCoverage(month(['WHG 1'], { 'WHG 1': ['2026-09-14', '2026-09-15'] }), '2026-09-01', '2026-09-30');
+        const text = coverageWarningText(c);
+        expect(text).to.include('UNVOLLSTAENDIG');
+        expect(text).to.include('28 von 30 Tagen');
+        expect(text).to.include('14-09-2026');
+        expect(text).to.include('15-09-2026');
     });
 });

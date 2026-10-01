@@ -26,7 +26,7 @@ const {
     queryTariffForMonth,
     queryMeterUmlagekostenPeriod,
 } = require('./lib/db');
-const { buildReportWorkbook, buildReportFileName } = require('./lib/report');
+const { buildReportWorkbook, buildReportFileName, periodCoverage, coverageWarningText } = require('./lib/report');
 const { determineScheduledPeriod } = require('./lib/scheduling');
 const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
@@ -240,6 +240,7 @@ async function main() {
         await ensureMariaDbPool();
         await checkDatabaseConnection();
         await flushPendingDays();
+        await checkMissedNight();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
         numinv = 0;
@@ -381,7 +382,10 @@ async function main() {
 
         // Runs once/day, well after midnight so "today" has fully rolled over for the
         // cutoff-day check in lib/scheduling.js.
-        reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => checkAndSendScheduledReport());
+        reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => {
+            await checkMissedNight(); // before the report, so a gap is in the log next to it
+            await checkAndSendScheduledReport();
+        });
 
         // Delivers daily rows that could not be written at the nightly run (see
         // persistOrQueueDay()) as soon as MariaDB is reachable again, and re-establishes
@@ -1273,6 +1277,36 @@ async function flushPendingDays() {
 } // END flushPendingDays
 
 /**
+ * The 23:58 run is the only source of billing rows. If the adapter, the VM or the
+ * Solar-Log was down at that moment, no row exists for that day and nothing retries it
+ * (the offline buffer only covers a DB outage AFTER the row was built). Without this
+ * check that gap stayed unnoticed until someone read a report. Logged as an error so it
+ * shows up in the ioBroker log/notifications; the days can be recovered from InfluxDB
+ * with tools/backfill-from-influx.js.
+ */
+async function checkMissedNight() {
+    try {
+        if (!adapter.config.mariadbEnabled || !adapter.config.invimp) {
+            return;
+        }
+        const lastState = await adapter.getStateAsync('Database.lastAccumulatedDate');
+        const lastDate = lastState && typeof lastState.val === 'string' ? lastState.val : null;
+        if (!lastDate) {
+            return; // never ran yet (fresh install) - nothing to compare against
+        }
+        const now = new Date();
+        const yesterday = localDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        if (lastDate < yesterday) {
+            adapter.log.error(
+                `Nightly billing run missing: the last processed day is ${lastDate}, expected at least ${yesterday}. The days in between have no billing rows (adapter, VM or Solar-Log was down at 23:58). Recover them from InfluxDB with tools/backfill-from-influx.js.`,
+            );
+        }
+    } catch (e) {
+        adapter.log.warn(`checkMissedNight - Error: ${e.message}`);
+    }
+} // END checkMissedNight
+
+/**
  * Manual/on-demand connectivity check, wired to the Database.testConnection button.
  * Also called once at adapter startup so Database.connected reflects reality without
  * needing a manual trigger first. Tries to (re)establish the pool if it isn't up yet
@@ -1759,6 +1793,13 @@ async function getTariffsForMonth(year, month) {
         }
     }
 
+    // No explicit tariff for this month in tariff_schedule (or the DB is unreachable): the
+    // value below is a built-in example/default, not a rate somebody entered. Say so every
+    // night instead of billing with it silently.
+    adapter.log.warn(
+        `No tariff set in tariff_schedule for ${year}-${month} (or MariaDB unreachable) - billing with the default/example tariff. Set the real tariff in the web app (Tarife).`,
+    );
+
     async function resolve(kind, fallbackDefault) {
         const monthState = await adapter.getStateAsync(`Tarif.${year}.${month}.${kind}`);
         if (monthState && monthState.val !== null && monthState.val !== undefined && monthState.val !== '') {
@@ -1904,6 +1945,18 @@ async function sendScheduledReport(period) {
                 adapter.config.reportEmailSubject,
                 adapter.config.reportEmailBody,
             );
+            // A report for a period with missing days understates consumption and CHF. It
+            // is still sent (a missing report is worse), but it says so loudly, in the
+            // subject and at the top of the text, and the log carries an error.
+            const coverage = periodCoverage(meterRows, period.fromDate, period.toDate);
+            const warning = coverageWarningText(coverage);
+            if (warning) {
+                adapter.log.error(
+                    `Scheduled report for ${period.label} is INCOMPLETE: ${coverage.missingDays.length} of ${coverage.expectedDays} day(s) have no billing data (${coverage.missingDays.join(', ')}). Recover with tools/backfill-from-influx.js, then re-send from the web app.`,
+                );
+                emailContent.subject = `[UNVOLLSTAENDIG] ${emailContent.subject}`;
+                emailContent.text = `${warning}\n\n${emailContent.text}`;
+            }
             const to = parseEmailList(adapter.config.reportRecipient).join(', ');
             const cc = parseEmailList(adapter.config.reportCc).join(', ');
             await adapter.sendToAsync(getEmailInstance(), 'send', {
