@@ -394,12 +394,26 @@ data reset, 2026-08-30..09-08 and 09-10/11 from the dead MariaDB connection,
 were filled from InfluxDB, see "Backfill from InfluxDB" below. Two
 consequences worth knowing:
 
-- Backfilled rows carry `zaehlerstand_start_kwh`/`zaehlerstand_ende_kwh` =
-  `NULL`. The adapter's lifetime counter (`INV.<meter>.yieldtotal`) cannot be
-  reconstructed for those days, and inventing a chain would fake a control
-  figure. The ioBroker month/lifetime counters themselves (`yieldmonth`,
-  `yieldtotal`, `solarbezugmonth`, ...) still lack the days the adapter did
-  not run (2026-09-13..17); billing never reads them, only the MariaDB rows.
+- Backfilled rows initially carried `zaehlerstand_start_kwh`/`zaehlerstand_ende_kwh` =
+  `NULL`. On 2026-10-01 the chain was completed (one-off correction, see
+  below). Rows before 2026-08-21 stay `NULL`: the lifetime counter was seeded
+  at the 2026-08-21 reset, there is no defined Zählerstand before it.
+- **Zählerstand correction 2026-10-01.** The lifetime counter
+  (`INV.<meter>.yieldtotal`) did not advance on 2026-09-13..17 (the replaced
+  adapter was active), so every row from 2026-09-18 was too low by the
+  consumption of those five days. Done once, for all 8 meters: (1) empty
+  start/end values for 2026-08-30..09-12 were filled from the neighbouring
+  real values (the chain matched to 1 Wh), (2) 2026-09-13..17 were chained
+  from the end of 2026-09-12, (3) all rows 2026-09-18..30 were shifted up by
+  the consumption of 2026-09-13..17 (240 rows), (4) the ioBroker states
+  `yieldtotal`, `yieldmonth`, `solarbezugmonth`, `netzbezugmonth` were raised
+  by the same amounts (solar share for 09-13..17 was 100 %) before the
+  September archive at the 2026-10-01 23:58 run. Verbrauch/Solar/Netz/CHF columns
+  were not touched; only the control figures. A JSON backup of the complete
+  `meter_daily` table taken before the change lies on Cyon at
+  `~/meter_daily_backup_20261001.json`. After the correction `yieldtotal`
+  equals `zaehlerstand_ende_kwh` of 2026-09-30 for every meter, and
+  Ende minus Anfang of September equals the billed September consumption.
 - The scheduled monthly e-mail reports for August (sent 2026-09-01) and
   September (sent 2026-10-01 00:10) were generated BEFORE the backfill and
   therefore contain the gaps; the archived copies in `export/sent/2026/` are
