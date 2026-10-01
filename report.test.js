@@ -291,7 +291,7 @@ describe('periodCoverage', () => {
 
     it('reports a full month as complete', () => {
         const c = periodCoverage(month(['WHG 1', 'WHG 2']), '2026-09-01', '2026-09-30');
-        expect(c).to.deep.equal({ expectedDays: 30, missingDays: [], complete: true });
+        expect(c).to.deep.equal({ expectedDays: 30, missingDays: [], staleDays: [], complete: true });
         expect(coverageWarningText(c)).to.equal('');
     });
 
@@ -359,5 +359,54 @@ describe('aggregateMeterRowsByMonth with tariff_schedule', () => {
             { reading_year: 2026, reading_month: 10, solarbezug_chf_kwh: '0.10', netzbezug_chf_kwh: '0.40' },
         ]);
         expect(out.map(g => g.totalChf)).to.deep.equal([6.4, 1]);
+    });
+});
+
+describe('periodCoverage with stale days', () => {
+    const full = (meters, staleDate) => {
+        const rows = [];
+        for (let d = 1; d <= 30; d++) {
+            const date = `2026-09-${String(d).padStart(2, '0')}`;
+            for (const m of meters) {
+                rows.push(
+                    dailyRow({
+                        meter_name: m,
+                        reading_date: date,
+                        datenqualitaet: date === staleDate ? 'veraltet' : 'ok',
+                    }),
+                );
+            }
+        }
+        return rows;
+    };
+
+    it('lists a day built from stale device values and calls the period not complete', () => {
+        const c = periodCoverage(full(['WHG 1', 'WHG 2'], '2026-09-12'), '2026-09-01', '2026-09-30');
+        expect(c.missingDays).to.deep.equal([]);
+        expect(c.staleDays).to.deep.equal(['2026-09-12']);
+        expect(c.complete).to.equal(false);
+    });
+
+    it('treats rows without the column (older rows, backfilled rows) as fine', () => {
+        const rows = full(['WHG 1'], null).map(r => {
+            const rest = { ...r };
+            delete rest.datenqualitaet;
+            return rest;
+        });
+        expect(periodCoverage(rows, '2026-09-01', '2026-09-30').complete).to.equal(true);
+    });
+
+    it('the warning text names the stale days and says why', () => {
+        const text = coverageWarningText(periodCoverage(full(['WHG 1'], '2026-09-12'), '2026-09-01', '2026-09-30'));
+        expect(text).to.include('veralteten Geraetedaten');
+        expect(text).to.include('12-09-2026');
+        expect(text).to.not.include('UNVOLLSTAENDIG'); // nothing is missing, only unsafe
+    });
+
+    it('reports missing and stale days together', () => {
+        const rows = full(['WHG 1'], '2026-09-12').filter(r => r.reading_date !== '2026-09-20');
+        const text = coverageWarningText(periodCoverage(rows, '2026-09-01', '2026-09-30'));
+        expect(text).to.include('UNVOLLSTAENDIG');
+        expect(text).to.include('veralteten Geraetedaten');
     });
 });

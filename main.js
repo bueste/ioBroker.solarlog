@@ -11,7 +11,7 @@ const axios = require('axios');
 const https = require('node:https');
 const schedule = require('node-schedule');
 const bcrypt = require('bcryptjs');
-const { selfConsumptionRatio, isBillableMeter } = require('./lib/billing');
+const { selfConsumptionRatio, isBillableMeter, deviceDataQuality } = require('./lib/billing');
 const mariadb = require('mariadb');
 const {
     buildMeterDailyRow,
@@ -33,6 +33,14 @@ const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
 const { enumerateMonthRange } = require('./lib/tariffs');
 const { createPendingDelivery } = require('./lib/pendingDelivery');
+const {
+    MAX_PENDING_DAYS: MAX_PENDING_REPORT_DAYS,
+    parseState: parseReportState,
+    reportKey: reportKeyOf,
+    registerDue: registerDueReport,
+    markSent: markReportSent,
+    expirePending: expirePendingReport,
+} = require('./lib/reportQueue');
 
 let adapter;
 
@@ -383,8 +391,12 @@ async function main() {
 
         // Runs once/day, well after midnight so "today" has fully rolled over for the
         // cutoff-day check in lib/scheduling.js.
-        reportCheckJob = schedule.scheduleJob('10 0 * * *', async () => {
-            await checkMissedNight(); // before the report, so a gap is in the log next to it
+        // Every hour at :10 (was: once at 00:10) so a report that could not be sent is
+        // retried - see checkAndSendScheduledReport().
+        reportCheckJob = schedule.scheduleJob('10 * * * *', async () => {
+            if (new Date().getHours() === 0) {
+                await checkMissedNight(); // once a day, before the report, so a gap is in the log next to it
+            }
             await checkAndSendScheduledReport();
         });
 
@@ -962,6 +974,15 @@ async function accumulateMonthlyPerDevice() {
             `accumulateMonthlyPerDevice: Fastpoll-Abdeckung heute ${(coverageRatio * 100).toFixed(1)}% -> Methode "${berechnungsmethode}"`,
         );
 
+        // Freshness of the device values the whole day is built from (see deviceDataQuality()).
+        const lastPollState = await adapter.getStateAsync('status.intradayLastPollTs');
+        const datenqualitaet = deviceDataQuality(lastPollState && lastPollState.val, Date.now());
+        if (datenqualitaet === 'veraltet') {
+            adapter.log.error(
+                `Nightly billing run ${todayStr}: the Solar-Log has not answered for more than 30 minutes (last poll ${lastPollState && lastPollState.val ? new Date(Number(lastPollState.val)).toISOString() : 'never'}) - today's values are stale and the rows are flagged "veraltet". Check the day against the InfluxDB history.`,
+            );
+        }
+
         const meterDailyRows = [];
         // Rows are built whenever MariaDB billing is enabled - NOT only while the pool is
         // up right now - so a night with the DB unreachable still produces the rows that
@@ -977,6 +998,13 @@ async function accumulateMonthlyPerDevice() {
             const totalId = `INV.${name}.yieldtotal`;
             const dayState = await adapter.getStateAsync(`INV.${name}.daysum`);
             if (!dayState || dayState.val === null || dayState.val === undefined) {
+                if (isBillableMeter(name)) {
+                    // No row for this meter today (and its Zählerstand does not advance):
+                    // the day is incomplete for this meter - never silent.
+                    adapter.log.error(
+                        `Nightly billing run ${todayStr}: no daysum value for billable meter "${name}" - no meter_daily row is written for it today.`,
+                    );
+                }
                 continue;
             }
             const daysum = Number(dayState.val) || 0;
@@ -1012,6 +1040,7 @@ async function accumulateMonthlyPerDevice() {
                         tarifNetz: dailyTariffs.netzbezug,
                         tarifSolar: dailyTariffs.solarbezug,
                         berechnungsmethode,
+                        datenqualitaet,
                     }),
                 );
             }
@@ -1108,6 +1137,7 @@ async function accumulateMonthlyPerDevice() {
                 einspeisungKwh: einspeisungWh / 1000,
                 selbstverbrauchtKwh: (consWh * ratio) / 1000,
                 berechnungsmethode,
+                datenqualitaet,
             });
             // ioBroker states above are already updated regardless - a DB problem only
             // delays persistence/reporting, it never blocks the live/monthly states.
@@ -1565,6 +1595,18 @@ async function ensureExportObjects() {
         },
         native: {},
     });
+    await adapter.extendObjectAsync('Export.reportState', {
+        type: 'state',
+        common: {
+            name: 'Scheduled report state',
+            type: 'string',
+            role: 'json',
+            read: true,
+            write: false,
+            desc: 'Internal - JSON {lastKey, pending}: the last scheduled report that was sent and a report that is due but not yet sent (retried hourly for up to 7 days)',
+        },
+        native: {},
+    });
     await adapter.extendObjectAsync('Export.lastFile', {
         type: 'state',
         common: {
@@ -1901,11 +1943,17 @@ async function checkEmailInstance(instance) {
  * if the email delivery itself fails (the whole point of this requirement).
  *
  * @param {{fromDate: string, toDate: string, label: string}} period
+ * @returns {Promise<boolean>} true = done (sent, or saved without recipient, or a config
+ *   error that retrying cannot fix); false = try again later (MariaDB or e-mail instance
+ *   not available, unexpected error) - see checkAndSendScheduledReport()
  */
 async function sendScheduledReport(period) {
     if (!mariadbPool) {
-        adapter.log.warn(`Scheduled report for ${period.label} is due but MariaDB is not connected - skipping.`);
-        return;
+        await ensureMariaDbPool();
+    }
+    if (!mariadbPool) {
+        adapter.log.warn(`Scheduled report for ${period.label} is due but MariaDB is not connected - will retry.`);
+        return false;
     }
     try {
         const meterRows = await queryMeterPeriod(mariadbPool, period.fromDate, period.toDate);
@@ -1930,20 +1978,20 @@ async function sendScheduledReport(period) {
                 adapter.log.error(
                     `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: recipient address(es) invalid: "${adapter.config.reportRecipient}"`,
                 );
-                return;
+                return true; // a configuration error - retrying cannot fix it
             }
             if (!isValidEmailList(adapter.config.reportCc, true)) {
                 adapter.log.error(
                     `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: Cc address(es) invalid: "${adapter.config.reportCc}"`,
                 );
-                return;
+                return true; // a configuration error - retrying cannot fix it
             }
             const instanceCheck = await checkEmailInstance(getEmailInstance());
             if (!instanceCheck.ok) {
                 adapter.log.error(
-                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: ${instanceCheck.message}`,
+                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: ${instanceCheck.message} - will retry.`,
                 );
-                return;
+                return false;
             }
             const emailContent = buildReportEmailContent(
                 period,
@@ -1983,9 +2031,11 @@ async function sendScheduledReport(period) {
         } else {
             adapter.log.warn(`Scheduled report for ${period.label} saved but not sent: no recipient configured.`);
         }
+        return true;
     } catch (e) {
         // File (if it got written before the failure) stays in export/sent/ as the fallback.
-        adapter.log.error(`sendScheduledReport(${period.label}) - Error: ${e.message}`);
+        adapter.log.error(`sendScheduledReport(${period.label}) - Error: ${e.message} - will retry.`);
+        return false;
     }
 } // END sendScheduledReport
 
@@ -2010,8 +2060,13 @@ async function cleanupSentReports() {
 } // END cleanupSentReports
 
 /**
- * Runs once/day: decides (via lib/scheduling.js) whether a scheduled report is due
- * today, sends it if so, and prunes sent-report copies older than 1 year regardless.
+ * Runs every hour (at :10). Decides (via lib/scheduling.js) whether a scheduled report is
+ * due today and registers it as pending; then tries to send the pending report. A report
+ * that could not be sent (MariaDB or mail server down, adapter restarting at 00:10) stays
+ * pending and is retried every hour for up to 7 days - it used to be tried exactly once.
+ * The state (last sent report, pending report) lives in Export.reportState so a restart
+ * neither loses a pending report nor sends a finished one again. Also prunes sent-report
+ * copies older than 1 year.
  */
 async function checkAndSendScheduledReport() {
     try {
@@ -2019,15 +2074,48 @@ async function checkAndSendScheduledReport() {
         if (!adapter.config.reportEnabled) {
             return;
         }
-        const period = determineScheduledPeriod(
+        const todayStr = localDateStr(new Date());
+        const stateObj = await adapter.getStateAsync('Export.reportState');
+        let state = parseReportState(stateObj && typeof stateObj.val === 'string' ? stateObj.val : null);
+
+        const due = determineScheduledPeriod(
             new Date(),
             adapter.config.reportSchedule,
             Number(adapter.config.reportCutoffDay) || 1,
         );
-        if (period) {
-            adapter.log.info(`Scheduled report due today: ${period.label} (${period.fromDate} - ${period.toDate})`);
-            await sendScheduledReport(period);
+        if (!stateObj || stateObj.val === null || stateObj.val === undefined) {
+            // First run of a version that keeps this state: the report due today (if any) was
+            // already handled by the old once-a-day job at 00:10 - do not send it a second time.
+            state = due ? { lastKey: reportKeyOf(adapter.config.reportSchedule, due), pending: null } : state;
+            await adapter.setStateAsync('Export.reportState', JSON.stringify(state), true);
+            adapter.log.info(`Report state initialised${due ? ` (report ${due.label} counts as already sent)` : ''}.`);
+            return;
         }
+        if (due) {
+            adapter.log.info(`Scheduled report due today: ${due.label} (${due.fromDate} - ${due.toDate})`);
+        }
+        const registered = registerDueReport(state, due, adapter.config.reportSchedule, todayStr);
+        state = registered.state;
+        if (registered.replaced) {
+            adapter.log.error(
+                `Scheduled report ${registered.replaced.key} could not be sent for days and is replaced by the next one - send it from the web app.`,
+            );
+        }
+        const expired = expirePendingReport(state, todayStr);
+        state = expired.state;
+        if (expired.expired) {
+            adapter.log.error(
+                `Scheduled report ${expired.expired.key} could not be sent within ${MAX_PENDING_REPORT_DAYS} days and is given up - send it from the web app.`,
+            );
+        }
+
+        if (state.pending) {
+            const done = await sendScheduledReport(state.pending.period);
+            if (done) {
+                state = markReportSent(state);
+            }
+        }
+        await adapter.setStateAsync('Export.reportState', JSON.stringify(state), true);
     } catch (e) {
         adapter.log.warn(`checkAndSendScheduledReport - Error: ${e.message}`);
     }

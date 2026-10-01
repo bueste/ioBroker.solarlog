@@ -174,3 +174,40 @@ describe('buildMeterDailyRow berechnungsmethode', () => {
         expect(row.berechnungsmethode).to.equal('integriert');
     });
 });
+
+describe('datenqualitaet', () => {
+    const meter = extra => ({
+        date: '2026-09-30',
+        meterName: 'WHG 1',
+        zStartKwh: 1,
+        zEndeKwh: 2,
+        verbrauchKwh: 1,
+        solarKwh: 0.5,
+        netzKwh: 0.5,
+        tarifNetz: 0.28,
+        tarifSolar: 0.2,
+        ...extra,
+    });
+    const building = extra => ({
+        date: '2026-09-30',
+        produktionKwh: 10,
+        verbrauchKwh: 8,
+        einspeisungKwh: 2,
+        ...extra,
+    });
+
+    it('defaults to ok for meter and building rows', () => {
+        expect(buildMeterDailyRow(meter({})).datenqualitaet).to.equal('ok');
+        expect(buildBuildingDailyRow(building({})).datenqualitaet).to.equal('ok');
+    });
+
+    it('carries veraltet through', () => {
+        expect(buildMeterDailyRow(meter({ datenqualitaet: 'veraltet' })).datenqualitaet).to.equal('veraltet');
+        expect(buildBuildingDailyRow(building({ datenqualitaet: 'veraltet' })).datenqualitaet).to.equal('veraltet');
+    });
+
+    it('rejects an unknown value instead of storing garbage', () => {
+        expect(() => buildMeterDailyRow(meter({ datenqualitaet: 'kaputt' }))).to.throw(/datenqualitaet/);
+        expect(() => buildBuildingDailyRow(building({ datenqualitaet: 'kaputt' }))).to.throw(/datenqualitaet/);
+    });
+});
