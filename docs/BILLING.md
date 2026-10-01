@@ -383,18 +383,125 @@ other.
 
 ### Known data gaps
 
-`meter_daily`/`building_daily` have **no rows for 2026-09-10, 2026-09-11,
-2026-09-13, 2026-09-14, 2026-09-15, 2026-09-16, and 2026-09-17** — the first
-two from the dead MariaDB connection (see above), the remaining five from a
-second, unrelated incident (see next section) where the installed adapter
-was silently replaced with the unmodified upstream package for almost a
-week. Not backfilled as of 2026-09-18; whether/how to reconstruct these days
-from the Solar-Log device's own 31-day rolling raw history (see the 2026-08
-backfill precedent — same mechanism, same caveats about not summing
-individual inverter registers) is a decision for whoever's handling billing
-for that period, not something to do silently. Note the 31-day window means
-2026-09-10/11 are close to aging out of the device's own history if a
-backfill is wanted.
+**Status since 2026-10-01: no gaps.** `meter_daily`/`building_daily` are
+complete for every day from **2026-08-10 to 2026-09-30** (52 days, 8 billable
+meters each). 2026-08-10 is the earliest day InfluxDB holds the device
+counters; nothing before it can be reconstructed.
+
+The gaps that existed until then (2026-08-10..08-20 after the 2026-08-21
+data reset, 2026-08-30..09-08 and 09-10/11 from the dead MariaDB connection,
+09-13..09-17 from the replaced adapter, see the two incidents above/below)
+were filled from InfluxDB, see "Backfill from InfluxDB" below. Two
+consequences worth knowing:
+
+- Backfilled rows carry `zaehlerstand_start_kwh`/`zaehlerstand_ende_kwh` =
+  `NULL`. The adapter's lifetime counter (`INV.<meter>.yieldtotal`) cannot be
+  reconstructed for those days, and inventing a chain would fake a control
+  figure. The ioBroker month/lifetime counters themselves (`yieldmonth`,
+  `yieldtotal`, `solarbezugmonth`, ...) still lack the days the adapter did
+  not run (2026-09-13..17); billing never reads them, only the MariaDB rows.
+- The scheduled monthly e-mail reports for August (sent 2026-09-01) and
+  September (sent 2026-10-01 00:10) were generated BEFORE the backfill and
+  therefore contain the gaps; the archived copies in `export/sent/2026/` are
+  deliberately left as sent. A corrected report is a re-send for the period
+  (web app: Dashboard, choose the month, "Bericht als XLSX an mich senden").
+
+## Backfill from InfluxDB (`tools/backfill-from-influx.js`)
+
+Re-creates missing days from the continuous InfluxDB history of exactly the
+device counters the nightly job reads (`status.yieldday`, `status.consyieldday`,
+`INV.<meter>.daysum`; all logged with `changesOnly: false`, 5 years retention).
+It is an **emulation of `accumulateMonthlyPerDevice()`**, not a new method:
+
+- value snapshot as of 23:58:00 local time of the day (what the cron saw)
+- `integriert` only if the 30 s fast poll covered >= 95 % of the day (gaps
+  > 5 min are not bridged), otherwise `tagesnetto` — the same
+  `accumulateIntradayDelta()` rules, replayed over the Influx raw points
+- days before 2026-08-22 are forced to `tagesnetto` (`--integrated-from`):
+  the intraday accumulator did not exist before 2.5.14 and the 5-minute raw
+  data of that era is too coarse to present as `integriert`
+- rows come from the adapter's own `buildMeterDailyRow()`/
+  `buildBuildingDailyRow()`, so rounding and `total_chf` are identical
+
+**Validation (the reason this can be trusted):** `--mode compare` recomputes
+days that already exist in MariaDB. All 24 real nightly rows (2026-08-21 to
+2026-09-30, including `integriert` and `tagesnetto` days) are reproduced to
+the Wh: production, consumption, feed-in, every meter's consumption and
+solar share, and the chosen method. Always run `compare` before `write`
+after touching the tool.
+
+```bash
+# env: INFLUX_ORG INFLUX_TOKEN [INFLUX_URL INFLUX_BUCKET] DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME [DB_SSL=1]
+node tools/backfill-from-influx.js --from 2026-08-10 --to 2026-09-30 --mode compare   # prove on existing days
+node tools/backfill-from-influx.js --from 2026-08-10 --to 2026-09-30 --mode dry-run   # show missing days
+node tools/backfill-from-influx.js --from 2026-08-10 --to 2026-09-30 --mode write     # write missing days only
+```
+
+`write` only inserts days that do not exist yet (`--overwrite` replaces
+existing ones). Tariffs: `tariff_schedule` row for the month, else
+`--tariff YYYY-MM=netz,solar`, else `--default-tariff` (0.28/0.20).
+
+**Known limit, 2026-09-13..09-17:** during the replaced-adapter incident
+Influx only has a 30-minute cadence (stock adapter), so the "23:58" snapshot
+is really the last reading at 23:37 (13.-15.09.) / 23:52 (16./17.09.). The
+device's own `consyieldyesterday` shows the building totals of those days are
+short by 0.4-0.6 kWh (13.-15.09.) and 0.1 kWh (16./17.09.), i.e. <= 0.8 %;
+per-meter figures are short by the same minutes. These five days are
+`tagesnetto` anyway. The dry-run prints this per-day shortfall.
+
+## Delivery buffer: nightly rows survive a database outage (since 2.5.20)
+
+Until 2.5.19 the nightly rows were only built if the MariaDB pool happened to
+exist at 23:58, and a failed write was just logged — an unreachable database at
+that moment cost the whole day (2026-09-10/11). Now:
+
+1. The rows are always built when MariaDB billing is enabled
+   (`getTariffsForMonth()` falls back to the ioBroker tariff states by itself).
+2. `persistOrQueueDay()` writes them; if that fails (no pool, one immediate
+   reconnect attempt failed, write error) they are buffered in the state
+   `Database.pendingRows` (JSON; `Database.pendingDays` = number of waiting days).
+3. A job every 10 minutes (`flushPendingDays()`) re-establishes the pool if
+   needed and delivers the buffered days **oldest first**, removing each day
+   only after it was written; it stops at the first failure and retries. A
+   successful night also flushes older days. After a delivery the current report
+   is regenerated.
+4. Buffered days are kept for **90 days** (`lib/pendingQueue.js MAX_AGE_DAYS`);
+   beyond that they are discarded with an `error` log line listing the dates.
+   `Database.pendingDays > 0` for more than a day means the connection needs attention.
+
+The logic lives in `lib/pendingQueue.js` (pure queue ops) and
+`lib/pendingDelivery.js` (dependencies injected), covered by 24 unit tests
+(DB down, DB back, abort mid-flush, ordering, duplicates, 90-day expiry,
+corrupt buffer, feature disabled). Verified live end to end on 2026-10-01: a
+buffered entry was delivered by the 18:00 job into the real Cyon database and
+the stored values were unchanged.
+
+Also in 2.5.20: `ensureMariaDbPool()` shares one in-flight attempt between
+concurrent callers, publishes the pool only after the schema check succeeded,
+ends a failed pool instead of leaking it (a failing setup used to leave a
+retrying orphan pool behind on every attempt), and is retried automatically —
+previously only a restart or the "Test connection" button re-established it.
+
+## Database name (2026-10-01): `swisslin_solintec` -> `swisslin_solarlog`
+
+The Cyon database was originally created as `swisslin_solintec` (named after a
+different project by mistake). It holds everything of this system: the
+adapter tables (`meter_daily`, `building_daily`, `tariff_schedule`,
+`meter_umlagekosten`, `meter_yearly_historic`) and the web app tables
+(`users`, `tenants`, `sessions`, `audit_log`, `report_subscriptions_custom`),
+so the migration copies all of them. New names: database `swisslin_solarlog`,
+user `swisslin_solarlo`. The name appears only in two places, both
+server-side: the web app's `private/config.php` and the ioBroker instance
+`system.adapter.solarlog.0` (`native.mariadbDatabase/mariadbUser/mariadbPassword`).
+Nothing in either repository references it.
+
+The migration is scripted (dump -> import -> per-table row count + checksum +
+money/kWh sum comparison -> config switch -> adapter restart with a connection
+check); every switch is rolled back automatically on failure and the old
+database stays untouched as a fallback. The password of the new user is only ever
+typed at a hidden prompt and passed on stdin, never as an argument or stored in
+the repository. The old database should be dropped in the Cyon panel after a
+few days.
 
 ## Deployment identity: why this MUST be a non-npm (git) install
 

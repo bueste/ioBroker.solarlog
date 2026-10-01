@@ -57,6 +57,19 @@ am 10./11.09.2026 zwei komplette Tage im Abrechnungsjournal gekostet. Systemd-Se
 Shell-Zugriff auf den `swisslin`-Account, der auch die anderen Cyon-Sites des Nutzers
 bedient).
 
+**Ausfallsicherheit des Journals (seit 2.5.20):** Ist die Datenbank um 23:58 nicht
+erreichbar, werden die Tageszeilen lokal im State `Database.pendingRows` gepuffert (bis zu
+90 Tage) und alle 10 Minuten automatisch nachgeliefert, sobald Cyon wieder erreichbar ist.
+Fehlende Tage lassen sich ausserdem aus der InfluxDB-Historie derselben Gerätezähler
+nachladen (`tools/backfill-from-influx.js`). Details in
+[BILLING.md](BILLING.md#delivery-buffer-nightly-rows-survive-a-database-outage-since-2520).
+
+**Datenbankname:** Die Cyon-Datenbank heisst seit 2026-10-01 `swisslin_solarlog` (User
+`swisslin_solarlo`); sie hiess ursprünglich fälschlich `swisslin_solintec` (Name eines
+anderen Projekts). Sie enthält sowohl die Adapter- als auch die Webapp-Tabellen. Der Name
+steht nur serverseitig in der Webapp-`config.php` und in der ioBroker-Instanz, nicht in den
+Repos.
+
 ## Schema-Eigentümerschaft
 
 - **Adapter besitzt** (`lib/db.js`, `ensureSchema()`): `meter_daily`, `building_daily`,
