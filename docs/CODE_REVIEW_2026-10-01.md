@@ -41,8 +41,11 @@ Tarife wirkten nicht rückwirkend (F-13, behoben), Berichte konnten unvollständ
 | F-12 | niedrig | Kleinere Härtungen: `JSON_HEX_*` beim Einbetten der TOTP-URI in ein Script, abgelehntes `ensurePool()` bricht die Nacht nicht mehr ab, ein unlesbarer Puffer wird als Fehler geloggt statt stillschweigend geleert. | Umgesetzt. |
 | F-13 | hoch | Tarifänderungen wirkten nicht rückwirkend (ehemals O-01). Die Tageszeilen speichern den Tarif des Schreibtags, Berichte nahmen den der letzten Zeile für den ganzen Monat. Ein nach Monatsende gesetzter Tarif änderte den Bericht nicht, ein mitten im Monat gesetzter galt im Bericht für den ganzen Monat, auf dem Bildschirm nur ab diesem Tag. | Der Tarif aus `tariff_schedule` gilt für den ganzen Kalendermonat, in den Berichten beider Systeme und in allen CHF-Summen der Webapp. Monate ohne Eintrag behalten den Tagestarif. Adapter 2.5.22 (3 neue Tests), Webapp. Auf den echten Daten mit einem Testtarif in einer zurückgerollten Transaktion geprüft. |
 | F-14 | mittel | Dashboard und Wohnungsseite summierten die gerundeten Tagesbeträge, der Bericht rechnet aus den gerundeten Monats-kWh (ehemals O-02). September: 393.43 gegen 393.46 CHF. | Eine gemeinsame Berechnung (`Reports::energyCostByMeter()`). Zusätzlich enthält das Audit-Log einer Tarifänderung jetzt den vorherigen Wert, die Sammeländerung läuft in einer Transaktion und das Jahr ist auf 2000 bis 2100 begrenzt. |
+| F-15 | hoch | Veraltete Gerätewerte wurden als voller Tag verbucht (ehemals O-03). War das Solar-Log ab Mittag nicht erreichbar, wurde der letzte Stand als Tageswert geschrieben, ohne Kennzeichnung. | Neue Spalte `datenqualitaet` in `meter_daily` und `building_daily` (`ok` oder `veraltet`, bestehende Zeilen `ok`). Der Nachtlauf setzt `veraltet`, wenn der letzte erfolgreiche Poll älter als 30 Minuten ist, und loggt einen Fehler. Berichte (Adapter und Webapp-Mail) nennen solche Tage, Dashboard und Wohnungsseite zeigen ein Warnbanner. Tests für die Schwelle und die Berichtslogik. |
+| F-16 | mittel | Ein abrechenbarer Zähler ohne `daysum`-Wert wurde im Nachtlauf stillschweigend übersprungen (ehemals O-04). | Fehler im Log mit Zählername. Die fehlende Zeile fällt zusätzlich in der Lückenprüfung der Berichte auf. |
+| F-17 | mittel | Der Adapterbericht wurde nur einmal um 00:10 versucht (ehemals O-06). | Stündlicher Job statt einmal täglich. Ein nicht versendeter Bericht bleibt `pending` (State `Export.reportState`) und wird bis zu 7 Tage lang wiederholt. Beim ersten Lauf gilt der heute fällige Bericht als erledigt, damit nichts doppelt versendet wird. Neues Modul `lib/reportQueue.js` mit Tests. |
 
-Ausgerollt: Adapter 2.5.22 (Commit d76715b, 123 Tests grün), Webapp (Commits 06334e0 und 960d4c9).
+Ausgerollt: Adapter 2.5.23 (Commit 4ff7be9, 145 Tests grün), Webapp (Commits 06334e0, 960d4c9 und 7c87353).
 Die Webapp-Dateien wurden vorher gesichert (`~/webapp_backup_20261001/` auf Cyon).
 
 ## Offen
@@ -51,25 +54,11 @@ Die Webapp-Dateien wurden vorher gesichert (`~/webapp_backup_20261001/` auf Cyon
 
 O-01 (rückwirkende Tarife) und O-02 (zwei verschiedene CHF-Beträge) sind am selben Abend behoben, siehe F-13 und F-14.
 
-**O-03 (hoch, nur aus dem Code, nicht live nachgestellt): Veraltete Gerätewerte werden als voller Tag verbucht.**
-Der Nachtlauf liest `status.yieldday`, `status.consyieldday` und `INV.<Zähler>.daysum` ohne Prüfung, wie alt diese Werte
-sind. War das Solar-Log ab Mittag nicht erreichbar, wird der letzte Stand als Tageswert geschrieben. Eine geringe
-Abdeckung schaltet nur auf `tagesnetto` um, markiert die Zeile aber nicht als unsicher.
-*Empfehlung:* Zeitstempel (`ts`) der Werte prüfen und bei Alter über etwa 30 Minuten die Zeile als unsicher
-kennzeichnen (neue Spalte oder Methode `unsicher`) und einen Fehler loggen.
-
-**O-04 (mittel): Zähler ohne `daysum` werden im Nachtlauf stillschweigend übersprungen** (`continue`). Es entsteht eine
-halbe Tageszeile. Seit F-09 fällt das in Berichten auf, die Ursache bleibt aber unsichtbar im Log.
-
 **O-05 (mittel): Systematische Unterschätzung und fragile Monatsgrenze.** Der Nachtlauf läuft um 23:58, die letzten zwei
 Minuten des Tages fehlen (das sind 0.14 % der Tagesdauer, die Auswirkung auf den Verbrauch ist entsprechend klein, aber immer in dieselbe Richtung). Die ioBroker-Monatszähler und das Monatsarchiv wechseln erst im
 Lauf des 1. um 23:58, also einen Tag nach der Monatsgrenze, und nur wenn dieser Lauf stattfindet. Die Berichte hängen
 nicht daran (sie lesen aus MariaDB), die Archiv-States aber schon.
 *Empfehlung:* Lauf um 23:59:30 oder zwei Läufe dokumentieren, und die Monatszähler aus der Datenbank ableiten.
-
-**O-06 (mittel): Der Adapterbericht wird nur einmal um 00:10 versucht.** Ist MariaDB oder der Mailserver dann nicht
-erreichbar oder der Adapter gerade im Neustart, wird der Bericht nicht nachgeholt (die Webapp wiederholt seit F-04).
-*Empfehlung:* gleiche Logik wie in der Webapp, mit gemerktem `last_period_key` in einem State.
 
 **O-13 (mittel, funktional): Mieter sind nicht mit der Abrechnung verknüpft.** Berichte sind pro Wohnung und Monat. Ein
 Mieterwechsel mitten im Monat ergibt eine gemeinsame Zeile. `mietbeginn` und `mietende` werden nicht ausgewertet.
@@ -117,12 +106,9 @@ Datenbank selbst löscht nichts.
 
 **O-18 (mittel): Testabdeckung.** Die Libs des Adapters haben 120 Unit-Tests. Der Nachtlauf in `main.js`
 (`accumulateMonthlyPerDevice`, die wichtigste Funktion des Systems) hat keine automatischen Tests, die Webapp gar keine
-(nur ein TOTP-Vektortest). Vor Änderungen an O-01, O-03 und O-05 sollten zuerst Tests für diese Teile entstehen.
+(nur ein TOTP-Vektortest). Vor einer Änderung an O-05 sollten zuerst Tests für diese Teile entstehen.
 
 ## Empfohlene Reihenfolge
 
-1. Die echten Tarife für August und September in der Webapp eintragen (wirken jetzt rückwirkend) und die Berichte neu versenden.
-2. O-03 (veraltete Werte) und O-04 (fehlende `daysum`).
-3. O-06 (Wiederholung des Adapterberichts).
-4. O-07 bis O-09 (Audit und TOTP), O-11 (Sicherungen entfernen).
-5. O-18 Tests für den Nachtlauf, danach O-05.
+1. O-07 bis O-09 (Audit und TOTP), O-11 (`private/` ausserhalb des Webroots).
+2. O-18 Tests für den Nachtlauf, danach O-05.
