@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "solarlog",
-    "version": "2.5.23",
+    "version": "2.5.24",
     "news": {
       "2.5.23": {
         "en": "New: the nightly run flags rows built from stale device values (Solar-Log not reachable for more than 30 minutes at 23:58) as datenqualitaet=veraltet (new column, existing rows stay ok) and logs an error; reports mark such days. A billable meter without a daysum value is logged as an error. The scheduled report is now retried every hour for up to 7 days when MariaDB or the mail server is not available (state Export.reportState); previously it was tried once at 00:10.",

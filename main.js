@@ -28,6 +28,7 @@ const {
     queryMeterUmlagekostenPeriod,
 } = require('./lib/db');
 const { buildReportWorkbook, buildReportFileName, periodCoverage, coverageWarningText } = require('./lib/report');
+const { parseJournal, upsertDay, serializeJournal } = require('./lib/journal');
 const { determineScheduledPeriod } = require('./lib/scheduling');
 const { isValidEmailList, parseEmailList } = require('./lib/validation');
 const { buildReportEmailContent } = require('./lib/email');
@@ -984,14 +985,17 @@ async function accumulateMonthlyPerDevice() {
         }
 
         const meterDailyRows = [];
-        // Rows are built whenever MariaDB billing is enabled - NOT only while the pool is
-        // up right now - so a night with the DB unreachable still produces the rows that
-        // persistOrQueueDay() buffers and delivers later. getTariffsForMonth() falls back
-        // to the ioBroker tariff states by itself when there is no pool.
+        // Rows are always built - NOT only while MariaDB billing is enabled or the pool is
+        // up right now: they go into the local journal (Database.dailyJournal) that the
+        // adapter iobroker.abrechnungmailcarrier delivers over the HTTPS API, and, if
+        // MariaDB is enabled, into persistOrQueueDay() which buffers and delivers them
+        // later. getTariffsForMonth() falls back to the ioBroker tariff states by itself
+        // when there is no pool.
         const dbEnabled = !!adapter.config.mariadbEnabled;
-        const dailyTariffs = dbEnabled
-            ? await getTariffsForMonth(String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'))
-            : null;
+        const dailyTariffs = await getTariffsForMonth(
+            String(now.getFullYear()),
+            String(now.getMonth() + 1).padStart(2, '0'),
+        );
 
         for (const name of names) {
             const monthId = `INV.${name}.yieldmonth`;
@@ -1027,7 +1031,7 @@ async function accumulateMonthlyPerDevice() {
             const zaehlerstandNachher = zaehlerstandVorher + daysum;
             await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
 
-            if (billable && dbEnabled && dailyTariffs) {
+            if (billable && dailyTariffs) {
                 meterDailyRows.push(
                     buildMeterDailyRow({
                         date: todayStr,
@@ -1129,16 +1133,23 @@ async function accumulateMonthlyPerDevice() {
         // to re-run and double-count them.
         await adapter.setStateAsync('Database.lastAccumulatedDate', todayStr, true);
 
+        const buildingRow = buildBuildingDailyRow({
+            date: todayStr,
+            produktionKwh: yieldWh / 1000,
+            verbrauchKwh: consWh / 1000,
+            einspeisungKwh: einspeisungWh / 1000,
+            selbstverbrauchtKwh: (consWh * ratio) / 1000,
+            berechnungsmethode,
+            datenqualitaet,
+        });
+        // The journal first and independent of the database: it is the way the rows reach
+        // the billing web application, a failure here is logged but must not stop the DB path.
+        try {
+            await writeJournalDay(todayStr, datenqualitaet, meterDailyRows, buildingRow);
+        } catch (e) {
+            adapter.log.error(`Journal entry for ${todayStr} could not be written: ${e.message}`);
+        }
         if (dbEnabled) {
-            const buildingRow = buildBuildingDailyRow({
-                date: todayStr,
-                produktionKwh: yieldWh / 1000,
-                verbrauchKwh: consWh / 1000,
-                einspeisungKwh: einspeisungWh / 1000,
-                selbstverbrauchtKwh: (consWh * ratio) / 1000,
-                berechnungsmethode,
-                datenqualitaet,
-            });
             // ioBroker states above are already updated regardless - a DB problem only
             // delays persistence/reporting, it never blocks the live/monthly states.
             await persistOrQueueDay(todayStr, meterDailyRows, buildingRow);
@@ -1297,6 +1308,26 @@ function createDelivery() {
     });
 }
 
+/**
+ * Puts one finished day into the local journal state Database.dailyJournal (the last 120 days).
+ * The read-change-write cycle is serialized, so the nightly run and a backfill cannot overwrite each other.
+ */
+let journalTail = Promise.resolve();
+function writeJournalDay(date, datenqualitaet, meterRows, buildingRow) {
+    const run = journalTail.then(async () => {
+        const state = await adapter.getStateAsync('Database.dailyJournal');
+        const journal = parseJournal(state && typeof state.val === 'string' ? state.val : null);
+        const updated = upsertDay(journal, { date, datenqualitaet, meterRows, buildingRow });
+        await adapter.setStateAsync('Database.dailyJournal', serializeJournal(updated), true);
+        adapter.log.info(`Journal: ${date} stored (${meterRows.length} meter rows), the journal holds ${updated.length} day(s)`);
+    });
+    journalTail = run.then(
+        () => undefined,
+        () => undefined,
+    );
+    return run;
+}
+
 async function persistOrQueueDay(date, meterRows, buildingRow) {
     pendingDelivery = pendingDelivery || createDelivery();
     return pendingDelivery.persistOrQueueDay(date, meterRows, buildingRow);
@@ -1317,7 +1348,7 @@ async function flushPendingDays() {
  */
 async function checkMissedNight() {
     try {
-        if (!adapter.config.mariadbEnabled || !adapter.config.invimp) {
+        if (!adapter.config.invimp) {
             return;
         }
         const lastState = await adapter.getStateAsync('Database.lastAccumulatedDate');
@@ -1557,6 +1588,19 @@ async function ensureDatabaseObjects() {
             write: false,
             def: 0,
             desc: 'Number of nightly billing days that could not be written to MariaDB yet and are delivered automatically once it is reachable (kept up to 90 days). Anything above 0 for more than a day means the database connection needs attention.',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.dailyJournal', {
+        type: 'state',
+        common: {
+            name: 'Daily billing journal (JSON, last 120 days)',
+            type: 'string',
+            role: 'json',
+            read: true,
+            write: false,
+            def: '',
+            desc: 'The finished nightly billing rows (meter_daily/building_daily) of the last 120 days, independent of MariaDB. Read by the adapter iobroker.abrechnungmailcarrier, which delivers them over the HTTPS API to the billing web application. Do not edit.',
         },
         native: {},
     });
@@ -1839,9 +1883,14 @@ async function getTariffsForMonth(year, month) {
     // No explicit tariff for this month in tariff_schedule (or the DB is unreachable): the
     // value below is a built-in example/default, not a rate somebody entered. Say so every
     // night instead of billing with it silently.
-    adapter.log.warn(
-        `No tariff set in tariff_schedule for ${year}-${month} (or MariaDB unreachable) - billing with the default/example tariff. Set the real tariff in the web app (Tarife).`,
-    );
+    // Without MariaDB the tariff is not authoritative here (the billing web application
+    // takes the tariff from its own tariff table), so this is only a hint then.
+    const tariffMessage = `No tariff set in tariff_schedule for ${year}-${month} (or MariaDB unreachable) - billing with the default/example tariff. Set the real tariff in the web app (Tarife).`;
+    if (adapter.config.mariadbEnabled) {
+        adapter.log.warn(tariffMessage);
+    } else {
+        adapter.log.debug(tariffMessage);
+    }
 
     async function resolve(kind, fallbackDefault) {
         const monthState = await adapter.getStateAsync(`Tarif.${year}.${month}.${kind}`);
