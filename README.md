@@ -31,12 +31,16 @@ Check if historical data is to be collected and set the time of day when the his
 
 Forecast: optionally, the adapter gets forecast - data using the Forecast.Solar API. Actually, the today's and tomorrow's total kWh are predicted, refreshing every hour. More detailed or additional data is available on request (pls open an issue).
 
-### Billing tab (multi-apartment self-consumption billing)
+### Billing journal (multi-apartment self-consumption billing)
 
-For properties with per-apartment sub-meters (e.g. a ZEV/tenant-billing setup): daily
-solar/grid consumption split, a MariaDB billing journal, XLSX reports, and scheduled
-e-mail delivery. See [docs/BILLING.md](docs/BILLING.md) for the full methodology,
-database schema, and reconciliation guarantees.
+For properties with per-apartment sub-meters (e.g. a ZEV/tenant-billing setup) the adapter splits the daily
+consumption of every meter into own solar power and grid power (method `integriert` from the fast poll, fallback
+`tagesnetto`). Every night at 23:58 the finished rows are stored in the state `Database.dailyJournal` (last 120
+days). The adapter [iobroker.abrechnungmailcarrier](https://github.com/bueste/ioBroker.AbrechnungMailcarrier)
+delivers them over an authenticated HTTPS API to the billing web application. Since 3.0.0 there is no database
+connection, no SSH tunnel and no report export in this adapter any more. A night that is missing can be rebuilt
+from InfluxDB with `tools/backfill-from-influx.js`. See [docs/BILLING.md](docs/BILLING.md) for the methodology
+(the parts about MariaDB and XLSX reports describe versions before 3.0.0).
 
 ## Hardware
 

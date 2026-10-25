@@ -1,41 +1,37 @@
 'use strict';
 
 /**
- * Re-creates meter_daily / building_daily rows for days the adapter could not persist
- * (adapter replaced/stopped, MariaDB unreachable at 23:58, ...) from the continuous
- * InfluxDB history of the same device counters the nightly job reads.
+ * Re-creates the journal entries (state Database.dailyJournal) for days the adapter could not write at 23:58
+ * (adapter stopped, Solar-Log not reachable, ...) from the continuous InfluxDB history of the same device counters
+ * the nightly job reads. The adapter iobroker.abrechnungmailcarrier then delivers the days to the billing web
+ * application over its HTTPS API.
  *
- * It emulates accumulateMonthlyPerDevice() (main.js) step by step and uses the adapter's
- * own row builders, so rounding/total_chf/structure are identical to a normal night:
+ * It emulates accumulateMonthlyPerDevice() (main.js) step by step and uses the adapter's own row builders, so
+ * rounding/total_chf/structure are identical to a normal night:
  *   - snapshot of status.yieldday / status.consyieldday / INV.<meter>.daysum as of 23:58:00
  *   - 'integriert' only if the 30s fast-poll covered >= 95% of the day (gaps > 5 min are
  *     not bridged), otherwise 'tagesnetto' - exactly accumulateIntradayDelta()'s rules
  *   - zaehlerstand_start/ende are written as NULL (the lifetime counter cannot be
  *     reconstructed and inventing a chain would fake a control figure)
  *
- * Modes (default compare - never writes):
- *   --mode compare   recompute days that ALREADY exist in MariaDB and show the differences
- *                    (use this first to prove the emulation matches real nightly runs)
- *   --mode dry-run   show what would be written for days that are MISSING in MariaDB
- *   --mode write     write the missing days (add --overwrite to also replace existing ones)
+ * Modes:
+ *   --mode dry-run   (default) shows what would be written, writes nothing
+ *   --mode write     writes the journal to --out (a file); with --merge <file> the days of an existing journal
+ *                    (output of "iobroker state get solarlog.0.Database.dailyJournal", only the val) are kept
+ *                    and the rebuilt days replace entries of the same date
  *
  * Usage (env):
- *   INFLUX_URL (default http://localhost:8086)  INFLUX_ORG  INFLUX_BUCKET (default iobroker)
- *   INFLUX_TOKEN   DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME   DB_SSL=1 for direct TLS
- *   node tools/backfill-from-influx.js --from 2026-08-10 --to 2026-09-30 --mode compare
- *   --default-tariff 0.28,0.20   (netz,solar; used for months without a tariff_schedule row)
- *   --tariff 2026-09=0.30,0.21   (repeatable per-month override)
+ *   INFLUX_URL (default http://localhost:8086)  INFLUX_ORG  INFLUX_BUCKET (default iobroker)  INFLUX_TOKEN
+ *   node tools/backfill-from-influx.js --from 2026-08-10 --to 2026-09-30 --meters "WHG 1,WHG 2" --mode dry-run
+ *   --default-tariff 0.28,0.20   (netz,solar; only fills the tariff columns of the rows, the web application
+ *                                 recomputes the amounts with its own tariff table)
+ *   --out journal.json   --merge existing.json
  */
 
-const mariadb = require('mariadb');
+const fs = require('node:fs');
 const { selfConsumptionRatio } = require('../lib/billing');
-const {
-    buildMeterDailyRow,
-    buildBuildingDailyRow,
-    upsertMeterDaily,
-    upsertBuildingDaily,
-    queryTariffForMonth,
-} = require('../lib/db');
+const { buildMeterDailyRow, buildBuildingDailyRow } = require('../lib/rows');
+const { parseJournal, upsertDay, serializeJournal } = require('../lib/journal');
 
 const INTRADAY_GAP_THRESHOLD_MS = 5 * 60 * 1000; // same constants as main.js
 const INTRADAY_COVERAGE_THRESHOLD = 0.95;
@@ -44,7 +40,8 @@ const SNAPSHOT_MINUTE = 58;
 
 function parseArgs(argv) {
     const args = {
-        mode: 'compare',
+        mode: 'dry-run',
+        meters: [],
         tariff: {},
         defaultTariff: [0.28, 0.2],
         overwrite: false,
@@ -54,7 +51,9 @@ function parseArgs(argv) {
         const a = argv[i];
         if (a === '--overwrite') {
             args.overwrite = true;
-        } else if (a === '--from' || a === '--to' || a === '--mode') {
+        } else if (a === '--meters') {
+            args.meters = argv[++i].split(',').map(x => x.trim()).filter(Boolean);
+        } else if (a === '--from' || a === '--to' || a === '--mode' || a === '--out' || a === '--merge') {
             args[a.slice(2)] = argv[++i];
         } else if (a === '--integrated-from') {
             args.integratedFrom = argv[++i];
@@ -70,8 +69,14 @@ function parseArgs(argv) {
     if (!args.from || !args.to) {
         throw new Error('--from and --to (YYYY-MM-DD, inclusive) are required');
     }
-    if (!['compare', 'dry-run', 'write'].includes(args.mode)) {
-        throw new Error('--mode must be compare, dry-run or write');
+    if (!['dry-run', 'write'].includes(args.mode)) {
+        throw new Error('--mode must be dry-run or write');
+    }
+    if (args.meters.length === 0) {
+        throw new Error('--meters "WHG 1,WHG 2,..." is required (the billable meter names)');
+    }
+    if (args.mode === 'write' && !args.out) {
+        throw new Error('--mode write needs --out <file>');
     }
     return args;
 }
@@ -280,111 +285,54 @@ function computeRows(dateStr, day, meters, tariffs, integratedFrom) {
     return { meterRows, buildingRow, coverageRatio };
 }
 
-async function tariffFor(pool, args, dateStr) {
+function tariffFor(args, dateStr) {
     const [y, mo] = dateStr.split('-').map(Number);
-    const dbRow = await queryTariffForMonth(pool, y, mo);
-    if (dbRow) {
-        return { netz: Number(dbRow.netzbezug_chf_kwh), solar: Number(dbRow.solarbezug_chf_kwh), src: 'tariff_schedule' };
-    }
     const key = `${y}-${pad(mo)}`;
-    const t = args.tariff[key] || args.defaultTariff;
-    return { netz: t[0], solar: t[1], src: args.tariff[key] ? '--tariff' : '--default-tariff' };
+    const tr = args.tariff[key] || args.defaultTariff;
+    return { netz: tr[0], solar: tr[1], src: args.tariff[key] ? '--tariff' : '--default-tariff' };
 }
 
 async function main() {
     const args = parseArgs(process.argv);
-    for (const [k, v] of Object.entries({ INFLUX_ORG, INFLUX_TOKEN, DB_HOST: process.env.DB_HOST, DB_USER: process.env.DB_USER, DB_PASSWORD: process.env.DB_PASSWORD, DB_NAME: process.env.DB_NAME })) {
+    for (const [k, v] of Object.entries({ INFLUX_ORG, INFLUX_TOKEN })) {
         if (!v) {
             throw new Error(`Environment variable ${k} is required`);
         }
     }
-    const pool = mariadb.createPool({
-        host: process.env.DB_HOST,
-        port: Number(process.env.DB_PORT) || 3306,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME,
-        connectionLimit: 2,
-        ...(process.env.DB_SSL === '1' ? { ssl: { rejectUnauthorized: true } } : {}),
-    });
-    try {
-        const meters = (await pool.query('SELECT DISTINCT meter_name FROM meter_daily ORDER BY meter_name')).map(
-            r => r.meter_name,
-        );
-        if (meters.length === 0) {
-            throw new Error('No meter names found in meter_daily - cannot derive the billable meter list');
-        }
-        const existingDates = new Set(
-            (await pool.query("SELECT DATE_FORMAT(reading_date,'%Y-%m-%d') d FROM meter_daily GROUP BY reading_date")).map(
-                r => r.d,
-            ),
-        );
-        console.log(`Zaehler: ${meters.join(', ')} | Modus: ${args.mode} | ${args.from} .. ${args.to}`);
+    const meters = args.meters;
+    let journal = args.merge ? parseJournal(fs.readFileSync(args.merge, 'utf8').trim().replace(/^"|"$/g, '')) : [];
+    console.log(`Zaehler: ${meters.join(', ')} | Modus: ${args.mode} | ${args.from} .. ${args.to}`);
 
-        const [fy, fm, fd] = args.from.split('-').map(Number);
-        const [ty, tm, td] = args.to.split('-').map(Number);
-        const stats = { written: 0, skipped: 0, compared: 0, methodMismatch: 0 };
-        for (let d = new Date(fy, fm - 1, fd); d <= new Date(ty, tm - 1, td); d.setDate(d.getDate() + 1)) {
-            const dateStr = ymd(d);
-            const exists = existingDates.has(dateStr);
-            if (args.mode === 'compare' ? !exists : exists && !args.overwrite) {
-                continue;
-            }
-            const day = await loadDay(dateStr, meters);
-            if (!day.ok) {
-                console.log(`${dateStr}  UEBERSPRUNGEN: ${day.reason}`);
-                stats.skipped++;
-                continue;
-            }
-            const tariffs = await tariffFor(pool, args, dateStr);
-            const { meterRows, buildingRow, coverageRatio } = computeRows(dateStr, day, meters, tariffs, args.integratedFrom);
-            const b = buildingRow;
-            const yy = day.yesterday[m('status.yieldyesterday')];
-            const cy = day.yesterday[m('status.consyieldyesterday')];
-            const gap =
-                yy === undefined || cy === undefined
-                    ? 'gestern-Zaehler n/a'
-                    : `Geraet-Tagestotal fehlt im 23:58-Wert: prod ${((yy / 1000 - b.produktion_kwh) * 1000).toFixed(0)} Wh, verb ${((cy / 1000 - b.verbrauch_kwh) * 1000).toFixed(0)} Wh`;
-            const head = `${dateStr}  ${b.berechnungsmethode.padEnd(10)} abd=${(coverageRatio * 100).toFixed(1)}%  prod=${b.produktion_kwh} verb=${b.verbrauch_kwh} einsp=${b.einspeisung_kwh} quote=${b.eigenverbrauchsquote}  tarif=${tariffs.netz}/${tariffs.solar}(${tariffs.src})  [${gap}]`;
-            if (args.mode === 'compare') {
-                const dbB = (await pool.query("SELECT * FROM building_daily WHERE reading_date = ?", [dateStr]))[0];
-                const dbM = await pool.query('SELECT * FROM meter_daily WHERE reading_date = ?', [dateStr]);
-                const dm = (a, c) => Math.abs(Number(a) - Number(c));
-                const dProd = dm(dbB.produktion_kwh, b.produktion_kwh);
-                const dVerb = dm(dbB.verbrauch_kwh, b.verbrauch_kwh);
-                const dEin = dm(dbB.einspeisung_kwh, b.einspeisung_kwh);
-                let dMeterVerb = 0;
-                let dMeterSolar = 0;
-                for (const r of meterRows) {
-                    const o = dbM.find(x => x.meter_name === r.meter_name);
-                    if (!o) {
-                        dMeterVerb = 999;
-                        continue;
-                    }
-                    dMeterVerb = Math.max(dMeterVerb, dm(o.verbrauch_kwh, r.verbrauch_kwh));
-                    dMeterSolar = Math.max(dMeterSolar, dm(o.solarbezug_kwh, r.solarbezug_kwh));
-                }
-                const same = dbB.berechnungsmethode === b.berechnungsmethode;
-                if (!same) {
-                    stats.methodMismatch++;
-                }
-                stats.compared++;
-                console.log(
-                    `${head}\n           DB: ${dbB.berechnungsmethode.padEnd(10)} prod=${dbB.produktion_kwh} verb=${dbB.verbrauch_kwh} einsp=${dbB.einspeisung_kwh}  | max.Abw kWh: prod=${dProd.toFixed(3)} verb=${dVerb.toFixed(3)} einsp=${dEin.toFixed(3)} zaehlerVerb=${dMeterVerb.toFixed(3)} zaehlerSolar=${dMeterSolar.toFixed(3)} ${same ? '' : '<-- METHODE ANDERS'}`,
-                );
-            } else {
-                console.log(head);
-                if (args.mode === 'write') {
-                    await upsertMeterDaily(pool, meterRows);
-                    await upsertBuildingDaily(pool, buildingRow);
-                    stats.written++;
-                }
-            }
+    const [fy, fm, fd] = args.from.split('-').map(Number);
+    const [ty, tm, td] = args.to.split('-').map(Number);
+    const stats = { built: 0, skipped: 0 };
+    for (let d = new Date(fy, fm - 1, fd); d <= new Date(ty, tm - 1, td); d.setDate(d.getDate() + 1)) {
+        const dateStr = ymd(d);
+        if (journal.some(e => e.date === dateStr) && !args.overwrite) {
+            console.log(`${dateStr}  im Journal vorhanden, uebersprungen (--overwrite zum Ersetzen)`);
+            continue;
         }
-        console.log(`\nFertig: ${JSON.stringify(stats)}`);
-    } finally {
-        await pool.end();
+        const day = await loadDay(dateStr, meters);
+        if (!day.ok) {
+            console.log(`${dateStr}  UEBERSPRUNGEN: ${day.reason}`);
+            stats.skipped++;
+            continue;
+        }
+        const tariffs = tariffFor(args, dateStr);
+        const { meterRows, buildingRow, coverageRatio } = computeRows(dateStr, day, meters, tariffs, args.integratedFrom);
+        const b = buildingRow;
+        console.log(
+            `${dateStr}  ${b.berechnungsmethode.padEnd(10)} abd=${(coverageRatio * 100).toFixed(1)}%  prod=${b.produktion_kwh} verb=${b.verbrauch_kwh} einsp=${b.einspeisung_kwh} quote=${b.eigenverbrauchsquote}`,
+        );
+        journal = upsertDay(journal, { date: dateStr, datenqualitaet: 'ok', meterRows, buildingRow });
+        stats.built++;
     }
+    if (args.mode === 'write') {
+        fs.writeFileSync(args.out, serializeJournal(journal));
+        console.log(`Journal mit ${journal.length} Tag(en) nach ${args.out} geschrieben.`);
+        console.log('Einspielen: iobroker state set solarlog.0.Database.dailyJournal "$(cat ' + args.out + ')" --ack true');
+    }
+    console.log(`\nFertig: ${JSON.stringify(stats)}`);
 }
 
 main().catch(e => {

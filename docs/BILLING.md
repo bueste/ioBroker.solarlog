@@ -1,5 +1,11 @@
 # Billing module — technical reference
 
+> **Version 3.0.0:** the MariaDB integration, the offline buffer, the XLSX reports, the report e-mails and the
+> bulk tariff tool described below were removed. The nightly rows (same column names as before) are kept in the
+> state `Database.dailyJournal` and delivered by the adapter iobroker.abrechnungmailcarrier over its HTTPS API; the
+> billing web application is the only place for tariffs, reports and invoices. The methodology (integration,
+> fallback, data quality) is unchanged.
+
 This document describes how `iobroker.solarlog` computes, stores, and reports the
 per-apartment solar/grid consumption split for the Trimmis property (8 apartments +
 `Allgemein`). It covers the same ground as the polished walkthrough shared with the

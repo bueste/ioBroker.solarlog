@@ -1,7 +1,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { buildMeterDailyRow, buildBuildingDailyRow } = require('./lib/db');
+const { buildMeterDailyRow, buildBuildingDailyRow } = require('./lib/rows');
 
 describe('buildMeterDailyRow', () => {
     it('computes the billed total from solar/grid kWh and their respective tariffs', () => {

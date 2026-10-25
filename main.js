@@ -12,36 +12,8 @@ const https = require('node:https');
 const schedule = require('node-schedule');
 const bcrypt = require('bcryptjs');
 const { selfConsumptionRatio, isBillableMeter, deviceDataQuality } = require('./lib/billing');
-const mariadb = require('mariadb');
-const {
-    buildMeterDailyRow,
-    buildBuildingDailyRow,
-    ensureSchema,
-    upsertMeterDaily,
-    upsertBuildingDaily,
-    upsertTariffSchedule,
-    upsertMeterUmlagekosten,
-    queryMeterPeriod,
-    queryBuildingPeriod,
-    queryTariffForMonth,
-    queryTariffsPeriod,
-    queryMeterUmlagekostenPeriod,
-} = require('./lib/db');
-const { buildReportWorkbook, buildReportFileName, periodCoverage, coverageWarningText } = require('./lib/report');
+const { buildMeterDailyRow, buildBuildingDailyRow } = require('./lib/rows');
 const { parseJournal, upsertDay, serializeJournal } = require('./lib/journal');
-const { determineScheduledPeriod } = require('./lib/scheduling');
-const { isValidEmailList, parseEmailList } = require('./lib/validation');
-const { buildReportEmailContent } = require('./lib/email');
-const { enumerateMonthRange } = require('./lib/tariffs');
-const { createPendingDelivery } = require('./lib/pendingDelivery');
-const {
-    MAX_PENDING_DAYS: MAX_PENDING_REPORT_DAYS,
-    parseState: parseReportState,
-    reportKey: reportKeyOf,
-    registerDue: registerDueReport,
-    markSent: markReportSent,
-    expirePending: expirePendingReport,
-} = require('./lib/reportQueue');
 
 let adapter;
 
@@ -125,12 +97,8 @@ let fastPolling;
 let jedeStunde;
 let jedenTag;
 let jedeNacht;
-let reportCheckJob;
-let pendingFlushJob;
+let missedNightJob;
 let restartTimer;
-let mariadbPool = null;
-let poolSetupInFlight = null;
-let pendingDelivery = null;
 
 let userName;
 let userPw;
@@ -158,16 +126,9 @@ function unload(callback) {
         jedeNacht && jedeNacht.cancel();
         jedeNacht = null;
 
-        reportCheckJob && reportCheckJob.cancel();
-        reportCheckJob = null;
 
-        pendingFlushJob && pendingFlushJob.cancel();
-        pendingFlushJob = null;
-
-        if (mariadbPool) {
-            mariadbPool.end().catch(() => {});
-            mariadbPool = null;
-        }
+        missedNightJob && missedNightJob.cancel();
+        missedNightJob = null;
 
         polling && clearInterval(polling);
         polling = null;
@@ -243,13 +204,9 @@ async function main() {
         adapter.log.info(`Solarlog IPaddress: ${deviceIpAddress}`);
         await ensureFeedinDayObject();
         await ensureIntradayAccumulatorObjects();
-        await ensureDatabaseObjects();
-        await ensureExportObjects();
+        await ensureJournalObjects();
         await ensureTariffDefaultObjects();
-        await cleanupLegacyTariffObjects();
-        await ensureMariaDbPool();
-        await checkDatabaseConnection();
-        await flushPendingDays();
+        await removeObsoleteObjects();
         await checkMissedNight();
 
         //cmd = '/getjp'; // Kommandos in der URL nach der Host-Adresse
@@ -387,25 +344,11 @@ async function main() {
 
         if (uzimp) {
             jedeNacht = schedule.scheduleJob('58 23 * * *', async () => accumulateMonthlyPerDevice());
-            await ensureAllMonthlyTariffsUntil(2035);
         }
 
-        // Runs once/day, well after midnight so "today" has fully rolled over for the
-        // cutoff-day check in lib/scheduling.js.
-        // Every hour at :10 (was: once at 00:10) so a report that could not be sent is
-        // retried - see checkAndSendScheduledReport().
-        reportCheckJob = schedule.scheduleJob('10 * * * *', async () => {
-            if (new Date().getHours() === 0) {
-                await checkMissedNight(); // once a day, before the report, so a gap is in the log next to it
-            }
-            await checkAndSendScheduledReport();
-        });
 
-        // Delivers daily rows that could not be written at the nightly run (see
-        // persistOrQueueDay()) as soon as MariaDB is reachable again, and re-establishes
-        // the pool itself if the initial connect failed - no restart or manual
-        // Database.testConnection needed.
-        pendingFlushJob = schedule.scheduleJob('*/10 * * * *', async () => flushPendingDays());
+        // Once a day, after midnight: a night without billing rows is logged as an error (see checkMissedNight()).
+        missedNightJob = schedule.scheduleJob('10 0 * * *', async () => checkMissedNight());
 
         if (backupAuto) {
             weeklyBackup = schedule.scheduleJob(`0 ${backupHour} * * ${backupWeekday}`, async () => {
@@ -418,9 +361,8 @@ async function main() {
             });
         }
 
+
         adapter.subscribeStates('Backup.trigger');
-        adapter.subscribeStates('Export.triggerMeterReadings');
-        adapter.subscribeStates('Database.testConnection');
         adapter.on('stateChange', async (id, state) => {
             if (!state || state.ack) {
                 return;
@@ -429,213 +371,9 @@ async function main() {
                 if (id === `${adapter.namespace}.Backup.trigger`) {
                     await adapter.setStateAsync('Backup.trigger', false, true);
                     await runBackup();
-                } else if (id === `${adapter.namespace}.Export.triggerMeterReadings`) {
-                    await adapter.setStateAsync('Export.triggerMeterReadings', false, true);
-                    await regenerateCurrentReport();
-                } else if (id === `${adapter.namespace}.Database.testConnection`) {
-                    await adapter.setStateAsync('Database.testConnection', false, true);
-                    await checkDatabaseConnection();
                 }
             } catch (e) {
                 adapter.log.warn(`stateChange(${id}) - Error: ${e.message}`);
-            }
-        });
-
-        // Lets the admin config page's "Test connection"/"Send test e-mail" buttons
-        // (Billing tab) get an immediate result back. Both test the CURRENTLY SAVED
-        // config (adapter.config), not unsaved form edits - save first, then test,
-        // same as every other setting on this page.
-        adapter.on('message', async obj => {
-            if (obj.command === 'testDatabaseConnection') {
-                try {
-                    await checkDatabaseConnection();
-                    const connState = await adapter.getStateAsync('Database.connected');
-                    const msgState = await adapter.getStateAsync('Database.lastCheckMessage');
-                    if (obj.callback) {
-                        adapter.sendTo(
-                            obj.from,
-                            obj.command,
-                            { connected: connState ? connState.val : false, message: msgState ? msgState.val : '' },
-                            obj.callback,
-                        );
-                    }
-                } catch (e) {
-                    if (obj.callback) {
-                        adapter.sendTo(obj.from, obj.command, { connected: false, message: e.message }, obj.callback);
-                    }
-                }
-            } else if (obj.command === 'generateReport') {
-                try {
-                    const fileName = await regenerateCurrentReport();
-                    if (!fileName) {
-                        throw new Error(
-                            'MariaDB is not enabled/connected - see instance configuration and Database.lastCheckMessage.',
-                        );
-                    }
-                    if (obj.callback) {
-                        adapter.sendTo(
-                            obj.from,
-                            obj.command,
-                            {
-                                ok: true,
-                                fileName,
-                                url: `/files/${adapter.namespace}/${fileName}`,
-                                message: `Generated: ${fileName}`,
-                            },
-                            obj.callback,
-                        );
-                    }
-                } catch (e) {
-                    if (obj.callback) {
-                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
-                    }
-                }
-            } else if (obj.command === 'getBillableMeters') {
-                if (obj.callback) {
-                    adapter.sendTo(obj.from, obj.command, { meters: names.filter(isBillableMeter) }, obj.callback);
-                }
-            } else if (obj.command === 'bulkSetTariffs') {
-                try {
-                    const p = obj.message || {};
-                    const fromYear = Number(p.fromYear);
-                    const fromMonth = Number(p.fromMonth);
-                    const toYear = Number(p.toYear);
-                    const toMonth = Number(p.toMonth);
-                    const netzbezug = Number(p.netzbezug);
-                    const solarbezug = Number(p.solarbezug);
-                    const months = enumerateMonthRange(fromYear, fromMonth, toYear, toMonth);
-                    if (!months.length) {
-                        throw new Error('Invalid or reversed month range.');
-                    }
-                    if (!(netzbezug >= 0) || !(solarbezug >= 0)) {
-                        throw new Error('Tariff values must be numbers >= 0.');
-                    }
-                    for (const m of months) {
-                        await setTariffForMonth(m.year, String(m.month).padStart(2, '0'), netzbezug, solarbezug);
-                    }
-                    adapter.log.info(
-                        `Bulk tariff set: ${months.length} month(s) from ${fromMonth}/${fromYear} to ${toMonth}/${toYear} - Netzbezug ${netzbezug}, Solarbezug ${solarbezug} CHF/kWh.`,
-                    );
-
-                    // Optional: Umlagekosten (a flat, non-energy-based monthly cost, e.g.
-                    // building maintenance) for one or more specific meters, over the SAME
-                    // month range - a second, independent thing this bulk tool can set.
-                    // "bezeichnung" (defaults to "Umlagekosten" for a plain admin-UI bulk
-                    // set) lets this same meter/month carry other itemized lines too - set
-                    // by the web app with a specific label, see private/src/Tariffs.php.
-                    let umlagekostenCount = 0;
-                    if (p.umlagekostenActive) {
-                        const umlagekosten = Number(p.umlagekosten);
-                        const bezeichnung = (p.umlagekostenBezeichnung || 'Umlagekosten').trim() || 'Umlagekosten';
-                        const meters = Array.isArray(p.umlagekostenMeters) ? p.umlagekostenMeters : [];
-                        if (!(umlagekosten >= 0)) {
-                            throw new Error('Umlagekosten must be a number >= 0.');
-                        }
-                        const invalidMeters = meters.filter(name => !isBillableMeter(name));
-                        if (meters.length === 0 || invalidMeters.length > 0) {
-                            throw new Error('Select at least one valid apartment/Allgemein meter for Umlagekosten.');
-                        }
-                        if (!mariadbPool) {
-                            throw new Error('MariaDB is not enabled/connected - Umlagekosten requires it.');
-                        }
-                        if (p.umlagekostenIsDefault) {
-                            // Standing default (reading_year=0, reading_month=0 - see
-                            // lib/db.js upsertMeterUmlagekosten docblock) - applies to every
-                            // month for this meter+bezeichnung with no expiry, ignoring the
-                            // Von/Bis range entirely (that range still governs the Tarif
-                            // part of this same bulk-set above).
-                            for (const meterName of meters) {
-                                await upsertMeterUmlagekosten(mariadbPool, 0, 0, meterName, bezeichnung, umlagekosten, true);
-                                umlagekostenCount++;
-                            }
-                            adapter.log.info(
-                                `Umlagekosten default set: "${bezeichnung}" ${umlagekosten} CHF/Monat (jeden Monat) für [${meters.join(', ')}].`,
-                            );
-                        } else {
-                            for (const m of months) {
-                                for (const meterName of meters) {
-                                    await upsertMeterUmlagekosten(
-                                        mariadbPool,
-                                        m.year,
-                                        m.month,
-                                        meterName,
-                                        bezeichnung,
-                                        umlagekosten,
-                                        true,
-                                    );
-                                    umlagekostenCount++;
-                                }
-                            }
-                            adapter.log.info(
-                                `Bulk Umlagekosten set: ${umlagekostenCount} meter-month row(s), "${bezeichnung}" ${umlagekosten} CHF for [${meters.join(', ')}].`,
-                            );
-                        }
-                    }
-
-                    if (obj.callback) {
-                        const parts = [`${months.length} Monat(e) aktualisiert.`];
-                        if (umlagekostenCount) {
-                            parts.push(`${umlagekostenCount} Umlagekosten-Zeile(n) gesetzt.`);
-                        }
-                        adapter.sendTo(
-                            obj.from,
-                            obj.command,
-                            { ok: true, count: months.length, message: parts.join(' ') },
-                            obj.callback,
-                        );
-                    }
-                } catch (e) {
-                    if (obj.callback) {
-                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
-                    }
-                }
-            } else if (obj.command === 'testEmail') {
-                try {
-                    if (!isValidEmailList(adapter.config.reportRecipient)) {
-                        throw new Error(
-                            `Recipient address(es) missing or invalid: "${adapter.config.reportRecipient || ''}"`,
-                        );
-                    }
-                    if (!isValidEmailList(adapter.config.reportCc, true)) {
-                        throw new Error(`Cc address(es) invalid: "${adapter.config.reportCc || ''}"`);
-                    }
-                    const instanceCheck = await checkEmailInstance(getEmailInstance());
-                    if (!instanceCheck.ok) {
-                        throw new Error(instanceCheck.message);
-                    }
-                    // Renders the SAME configured subject/body template the real scheduled
-                    // report would use, with placeholder (test) values - so "Send test
-                    // e-mail" actually previews what a recipient will see, not a fixed,
-                    // unrelated message.
-                    const testContent = buildReportEmailContent(
-                        { label: '2026-01', fromDate: '2026-01-01', toDate: '2026-01-31' },
-                        adapter.config.reportEmailSubject,
-                        adapter.config.reportEmailBody,
-                    );
-                    const testTo = parseEmailList(adapter.config.reportRecipient).join(', ');
-                    const testCc = parseEmailList(adapter.config.reportCc).join(', ');
-                    await adapter.sendToAsync(getEmailInstance(), 'send', {
-                        to: testTo,
-                        ...(testCc ? { cc: testCc } : {}),
-                        subject: `[Test] ${testContent.subject}`,
-                        text: `${testContent.text}\n\n(Dies ist eine Testnachricht, gesendet über Instanz "${getEmailInstance()}" - kein echter Bericht angehängt.)`,
-                    });
-                    if (obj.callback) {
-                        adapter.sendTo(
-                            obj.from,
-                            obj.command,
-                            {
-                                ok: true,
-                                message: `Sent via ${getEmailInstance()} to ${testTo}${testCc ? ` (Cc: ${testCc})` : ''}.`,
-                            },
-                            obj.callback,
-                        );
-                    }
-                } catch (e) {
-                    if (obj.callback) {
-                        adapter.sendTo(obj.from, obj.command, { ok: false, message: e.message }, obj.callback);
-                    }
-                }
             }
         });
     } catch (e) {
@@ -985,17 +723,9 @@ async function accumulateMonthlyPerDevice() {
         }
 
         const meterDailyRows = [];
-        // Rows are always built - NOT only while MariaDB billing is enabled or the pool is
-        // up right now: they go into the local journal (Database.dailyJournal) that the
-        // adapter iobroker.abrechnungmailcarrier delivers over the HTTPS API, and, if
-        // MariaDB is enabled, into persistOrQueueDay() which buffers and delivers them
-        // later. getTariffsForMonth() falls back to the ioBroker tariff states by itself
-        // when there is no pool.
-        const dbEnabled = !!adapter.config.mariadbEnabled;
-        const dailyTariffs = await getTariffsForMonth(
-            String(now.getFullYear()),
-            String(now.getMonth() + 1).padStart(2, '0'),
-        );
+        // The rows go into the local journal (Database.dailyJournal) that the adapter
+        // iobroker.abrechnungmailcarrier delivers over the HTTPS API.
+        const dailyTariffs = await getTariffsForMonth();
 
         for (const name of names) {
             const monthId = `INV.${name}.yieldmonth`;
@@ -1127,9 +857,9 @@ async function accumulateMonthlyPerDevice() {
         adapter.log.debug(
             `Accumulated per-device monthly totals (self-consumption ratio today: ${(ratio * 100).toFixed(1)}%)`,
         );
-        // Marks today as processed BEFORE the MariaDB write below, since the guard at the
+        // Marks today as processed BEFORE the journal write below, since the guard at the
         // top of this function protects the Zählerstand states updated above (already
-        // done at this point) - a MariaDB hiccup afterwards must not make today eligible
+        // done at this point) - a failure afterwards must not make today eligible
         // to re-run and double-count them.
         await adapter.setStateAsync('Database.lastAccumulatedDate', todayStr, true);
 
@@ -1142,17 +872,13 @@ async function accumulateMonthlyPerDevice() {
             berechnungsmethode,
             datenqualitaet,
         });
-        // The journal first and independent of the database: it is the way the rows reach
-        // the billing web application, a failure here is logged but must not stop the DB path.
+        // The journal is the only way the rows reach the billing web application. The ioBroker states above
+        // are already updated regardless; a failure here is logged as an error and the day can be rebuilt with
+        // tools/backfill-from-influx.js.
         try {
             await writeJournalDay(todayStr, datenqualitaet, meterDailyRows, buildingRow);
         } catch (e) {
             adapter.log.error(`Journal entry for ${todayStr} could not be written: ${e.message}`);
-        }
-        if (dbEnabled) {
-            // ioBroker states above are already updated regardless - a DB problem only
-            // delays persistence/reporting, it never blocks the live/monthly states.
-            await persistOrQueueDay(todayStr, meterDailyRows, buildingRow);
         }
     } catch (e) {
         adapter.log.warn(`accumulateMonthlyPerDevice - Error: ${e.message}`);
@@ -1188,124 +914,8 @@ async function ensureBillingSplitStates(name) {
     });
 } // END ensureBillingSplitStates
 
-/**
- * Connects to MariaDB and ensures the billing schema exists, if enabled in the instance
- * configuration. Never throws - on failure, mariadbPool stays null and every dependent
- * feature (daily DB writes, XLSX reports, scheduled emails) logs a warning and no-ops
- * instead of crashing the adapter. The connection is retried on the next adapter restart.
- */
-async function ensureMariaDbPool() {
-    if (!adapter.config.mariadbEnabled) {
-        adapter.log.debug('MariaDB is disabled in the instance configuration - billing DB features are inactive.');
-        return;
-    }
-    if (mariadbPool) {
-        return;
-    }
-    // Several callers can ask at the same time (startup, the 10-minute delivery job, the
-    // nightly write, the Database.testConnection button) - share one in-flight attempt
-    // instead of creating parallel pools.
-    if (!poolSetupInFlight) {
-        poolSetupInFlight = setupMariaDbPool().finally(() => {
-            poolSetupInFlight = null;
-        });
-    }
-    return poolSetupInFlight;
-} // END ensureMariaDbPool
-
-async function setupMariaDbPool() {
-    let pool = null;
-    try {
-        // mariadbUseSsl defaults to true (undefined -> true) so every existing install
-        // that predates this option keeps its current direct-TLS behavior unchanged.
-        // Set to false when mariadbHost is a local SSH-tunnel endpoint (127.0.0.1) - see
-        // docs/ARCHITECTURE.md "MariaDB via SSH-Tunnel" for when/why: the tunnel already
-        // encrypts everything end-to-end, a loopback address can never match the server's
-        // *.cyon.net certificate CN, and testing showed Cyon's MariaDB actually REQUIRES a
-        // real TLS handshake on port 3306 even for local 127.0.0.1 connections - so this
-        // is a deliberate two-state switch (full TLS+hostname-verification XOR none),
-        // never a half-measure of TLS-without-verification against a real remote host.
-        const useSsl = adapter.config.mariadbUseSsl !== false;
-        pool = mariadb.createPool({
-            host: adapter.config.mariadbHost,
-            port: Number(adapter.config.mariadbPort) || 3306,
-            user: adapter.config.mariadbUser,
-            password: adapter.config.mariadbPassword,
-            database: adapter.config.mariadbDatabase,
-            connectionLimit: 3,
-            // Full certificate chain + hostname verification. The server presents a
-            // properly CA-issued certificate (GlobalSign, *.cyon.net) - it was only ever
-            // misdiagnosed as self-signed because connecting via the raw IP address
-            // (149.126.4.85) can never match a hostname-pattern certificate's CN. Using
-            // the *.cyon.net hostname in mariadbHost instead of the IP is what makes this
-            // work; falling back to an IP here would silently break verification again.
-            ...(useSsl ? { ssl: { rejectUnauthorized: true } } : {}),
-        });
-        // A connection pool is an EventEmitter - an unhandled 'error' event (e.g. the DB
-        // dropping an idle connection in the background, unrelated to any single query)
-        // is treated by Node as a thrown exception and can crash the whole adapter process
-        // if nothing is listening. This only logs it; individual query failures are still
-        // caught at each call site below.
-        pool.on('error', e => {
-            adapter.log.warn(`MariaDB pool error (background, non-fatal): ${e.message}`);
-        });
-        await ensureSchema(pool);
-        // Only now is the pool usable - callers checking `mariadbPool` must never see a
-        // pool whose first connection/schema check is still in flight or has failed.
-        mariadbPool = pool;
-        adapter.log.info(
-            'MariaDB connected, billing schema ensured (meter_daily/building_daily/meter_yearly_historic).',
-        );
-    } catch (e) {
-        adapter.log.error(
-            `MariaDB setup failed (${e.message}) - the nightly rows are buffered locally and the connection is retried every 10 minutes.`,
-        );
-        mariadbPool = null;
-        if (pool) {
-            // A failed pool keeps retrying its own connections in the background - end it so
-            // repeated attempts don't pile up dozens of orphaned pools.
-            pool.end().catch(() => {});
-        }
-    }
-} // END setupMariaDbPool
-
 function localDateStr(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * Offline buffer for the nightly billing rows (up to 90 days) - the logic lives in
- * lib/pendingDelivery.js (unit-tested with fakes); this only wires it to the adapter's
- * states, the MariaDB pool and the report generator.
- */
-function createDelivery() {
-    return createPendingDelivery({
-        log: {
-            info: m => adapter.log.info(m),
-            warn: m => adapter.log.warn(m),
-            error: m => adapter.log.error(m),
-            debug: m => adapter.log.debug(m),
-        },
-        enabled: () => !!adapter.config.mariadbEnabled,
-        loadRaw: async () => {
-            const state = await adapter.getStateAsync('Database.pendingRows');
-            return state && typeof state.val === 'string' ? state.val : null;
-        },
-        saveRaw: async (json, count) => {
-            await adapter.setStateAsync('Database.pendingRows', json, true);
-            await adapter.setStateAsync('Database.pendingDays', count, true);
-        },
-        hasPool: () => !!mariadbPool,
-        ensurePool: ensureMariaDbPool,
-        writeDay: async (meterRows, buildingRow) => {
-            await upsertMeterDaily(mariadbPool, meterRows);
-            await upsertBuildingDaily(mariadbPool, buildingRow);
-        },
-        afterDelivery: async () => {
-            await regenerateCurrentReport();
-        },
-        today: () => localDateStr(new Date()),
-    });
 }
 
 /**
@@ -1327,16 +937,6 @@ function writeJournalDay(date, datenqualitaet, meterRows, buildingRow) {
     );
     return run;
 }
-
-async function persistOrQueueDay(date, meterRows, buildingRow) {
-    pendingDelivery = pendingDelivery || createDelivery();
-    return pendingDelivery.persistOrQueueDay(date, meterRows, buildingRow);
-}
-
-async function flushPendingDays() {
-    pendingDelivery = pendingDelivery || createDelivery();
-    return pendingDelivery.flushPendingDays();
-} // END flushPendingDays
 
 /**
  * The 23:58 run is the only source of billing rows. If the adapter, the VM or the
@@ -1367,52 +967,6 @@ async function checkMissedNight() {
         adapter.log.warn(`checkMissedNight - Error: ${e.message}`);
     }
 } // END checkMissedNight
-
-/**
- * Manual/on-demand connectivity check, wired to the Database.testConnection button.
- * Also called once at adapter startup so Database.connected reflects reality without
- * needing a manual trigger first. Tries to (re)establish the pool if it isn't up yet
- * (e.g. the DB was unreachable at startup but has since come back).
- */
-async function checkDatabaseConnection() {
-    const nowIso = new Date().toISOString();
-    try {
-        if (!adapter.config.mariadbEnabled) {
-            await adapter.setStateAsync('Database.connected', false, true);
-            await adapter.setStateAsync(
-                'Database.lastCheckMessage',
-                'MariaDB is disabled in the instance configuration.',
-                true,
-            );
-            await adapter.setStateAsync('Database.lastCheck', nowIso, true);
-            return;
-        }
-        if (!mariadbPool) {
-            await ensureMariaDbPool();
-        }
-        if (!mariadbPool) {
-            await adapter.setStateAsync('Database.connected', false, true);
-            await adapter.setStateAsync(
-                'Database.lastCheckMessage',
-                'Not connected - see the adapter log for the connection error.',
-                true,
-            );
-            await adapter.setStateAsync('Database.lastCheck', nowIso, true);
-            return;
-        }
-        try {
-            await mariadbPool.query('SELECT 1');
-            await adapter.setStateAsync('Database.connected', true, true);
-            await adapter.setStateAsync('Database.lastCheckMessage', 'OK', true);
-        } catch (e) {
-            await adapter.setStateAsync('Database.connected', false, true);
-            await adapter.setStateAsync('Database.lastCheckMessage', `Query failed: ${e.message}`, true);
-        }
-        await adapter.setStateAsync('Database.lastCheck', nowIso, true);
-    } catch (e) {
-        adapter.log.warn(`checkDatabaseConnection - Error: ${e.message}`);
-    }
-} // END checkDatabaseConnection
 
 async function ensureFeedinDayObject() {
     // Declared in io-package.json instanceObjects too, but js-controller does not
@@ -1514,157 +1068,6 @@ async function ensureIntradayAccumulatorObjects() {
     });
 } // END ensureIntradayAccumulatorObjects
 
-async function ensureDatabaseObjects() {
-    // Same js-controller instanceObjects-sync caveat as ensureFeedinDayObject() above -
-    // create explicitly so a plain file-update deploy (not a recognized version bump)
-    // still gets these objects before anything tries to setStateAsync() on them.
-    await adapter.setObjectNotExistsAsync('Database', {
-        type: 'channel',
-        common: { name: 'Database' },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.testConnection', {
-        type: 'state',
-        common: {
-            name: 'Test MariaDB connection now',
-            type: 'boolean',
-            role: 'button',
-            read: false,
-            write: true,
-            def: false,
-            desc: '(Re)connect and run a test query against MariaDB right now, updating Database.connected/lastCheckMessage',
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.connected', {
-        type: 'state',
-        common: {
-            name: 'MariaDB reachable',
-            type: 'boolean',
-            role: 'indicator.connected',
-            read: true,
-            write: false,
-            def: false,
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.lastCheckMessage', {
-        type: 'state',
-        common: { name: 'Last check result', type: 'string', role: 'text', read: true, write: false, def: '' },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.lastCheck', {
-        type: 'state',
-        common: {
-            name: 'Last check timestamp',
-            type: 'string',
-            role: 'value.datetime',
-            read: true,
-            write: false,
-            def: '',
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.lastAccumulatedDate', {
-        type: 'state',
-        common: {
-            name: 'Last date the daily billing accumulation ran (YYYY-MM-DD)',
-            type: 'string',
-            role: 'value.datetime',
-            read: true,
-            write: false,
-            def: '',
-            desc: 'Idempotency guard: accumulateMonthlyPerDevice() refuses to run again for a date already recorded here, so the running Zählerstand can never be double-counted by an accidental second run on the same day.',
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.pendingDays', {
-        type: 'state',
-        common: {
-            name: 'Billing days buffered locally, waiting for MariaDB',
-            type: 'number',
-            role: 'value',
-            read: true,
-            write: false,
-            def: 0,
-            desc: 'Number of nightly billing days that could not be written to MariaDB yet and are delivered automatically once it is reachable (kept up to 90 days). Anything above 0 for more than a day means the database connection needs attention.',
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.dailyJournal', {
-        type: 'state',
-        common: {
-            name: 'Daily billing journal (JSON, last 120 days)',
-            type: 'string',
-            role: 'json',
-            read: true,
-            write: false,
-            def: '',
-            desc: 'The finished nightly billing rows (meter_daily/building_daily) of the last 120 days, independent of MariaDB. Read by the adapter iobroker.abrechnungmailcarrier, which delivers them over the HTTPS API to the billing web application. Do not edit.',
-        },
-        native: {},
-    });
-    await adapter.setObjectNotExistsAsync('Database.pendingRows', {
-        type: 'state',
-        common: {
-            name: 'Buffered billing rows (JSON, internal)',
-            type: 'string',
-            role: 'json',
-            read: true,
-            write: false,
-            def: '',
-            desc: 'Internal offline buffer behind Database.pendingDays: the meter_daily/building_daily rows of the buffered days as JSON. Do not edit.',
-        },
-        native: {},
-    });
-} // END ensureDatabaseObjects
-
-async function ensureExportObjects() {
-    // Same instanceObjects-sync caveat as ensureFeedinDayObject()/ensureDatabaseObjects()
-    // above - but this one also had actual stale content: an earlier version's CSV-era
-    // name/description survived multiple redeploys on production because nothing ever
-    // called extendObjectAsync to overwrite it (setObjectNotExistsAsync only creates,
-    // never corrects, an object that already exists).
-    await adapter.extendObjectAsync('Export', { type: 'channel', common: { name: 'Export' }, native: {} });
-    await adapter.extendObjectAsync('Export.triggerMeterReadings', {
-        type: 'state',
-        common: {
-            name: 'Generate current-period billing report (XLSX)',
-            type: 'boolean',
-            role: 'button',
-            read: false,
-            write: true,
-            def: false,
-            desc: 'Set to true to regenerate the month-to-date billing report from MariaDB as an .xlsx file, downloadable via Export.lastFile',
-        },
-        native: {},
-    });
-    await adapter.extendObjectAsync('Export.reportState', {
-        type: 'state',
-        common: {
-            name: 'Scheduled report state',
-            type: 'string',
-            role: 'json',
-            read: true,
-            write: false,
-            desc: 'Internal - JSON {lastKey, pending}: the last scheduled report that was sent and a report that is due but not yet sent (retried hourly for up to 7 days)',
-        },
-        native: {},
-    });
-    await adapter.extendObjectAsync('Export.lastFile', {
-        type: 'state',
-        common: {
-            name: 'Last export file',
-            type: 'string',
-            role: 'text',
-            read: true,
-            write: false,
-            desc: "Path of the last XLSX export within this adapter's file storage - open it via the Files tab in the ioBroker Admin object tree, or download it directly at http://<this host>:8081/files/solarlog.0/<this path>",
-        },
-        native: {},
-    });
-} // END ensureExportObjects
-
 async function ensureDailySplitStates(name) {
     await adapter.setObjectNotExistsAsync(`INV.${name}.solarbezugday`, {
         type: 'state',
@@ -1723,64 +1126,6 @@ async function ensureValueState(id, commonDef, defaultValue) {
     }
 } // END ensureValueState
 
-async function ensureMonthlyTariffState(year, month) {
-    await ensureValueState(
-        `Tarif.${year}.${month}.netzbezug`,
-        {
-            name: `Netzbezugspreis ${month}/${year}`,
-            type: 'number',
-            role: 'value',
-            read: true,
-            write: true,
-            def: DEFAULT_TARIFF_NETZBEZUG,
-            unit: 'CHF/kWh',
-            desc: `All-in grid draw price for ${month}/${year} incl. Netznutzung/grid fees and taxes (EXAMPLE default, verify actual rate), falls back to Tarif.default.netzbezug when unset`,
-        },
-        DEFAULT_TARIFF_NETZBEZUG,
-    );
-    await ensureValueState(
-        `Tarif.${year}.${month}.solarbezug`,
-        {
-            name: `Solarbezugspreis ${month}/${year}`,
-            type: 'number',
-            role: 'value',
-            read: true,
-            write: true,
-            def: DEFAULT_TARIFF_SOLARBEZUG,
-            unit: 'CHF/kWh',
-            desc: `Self-consumption (PV) tariff for ${month}/${year} (EXAMPLE default, verify actual rate), falls back to Tarif.default.solarbezug when unset`,
-        },
-        DEFAULT_TARIFF_SOLARBEZUG,
-    );
-} // END ensureMonthlyTariffState
-
-/**
- * Explicitly (over)writes a month's tariff, unlike ensureMonthlyTariffState()/
- * ensureValueState() which only ever SEED a value the first time an object is created
- * and never touch it again afterwards. This is the write path for the Billing tab's
- * bulk tariff-set tool - an intentional user edit, not a first-time default.
- *
- * @param {number} year
- * @param {string} month "01".."12"
- * @param {number} netzbezug
- * @param {number} solarbezug
- */
-async function setTariffForMonth(year, month, netzbezug, solarbezug) {
-    await ensureMonthlyTariffState(year, month);
-    await adapter.setStateAsync(`Tarif.${year}.${month}.netzbezug`, netzbezug, true);
-    await adapter.setStateAsync(`Tarif.${year}.${month}.solarbezug`, solarbezug, true);
-    // Also written to MariaDB (tariff_schedule) - preparation for a future web
-    // application to read/write tariffs directly, without needing ioBroker object-tree
-    // access. Best-effort: a DB hiccup here must not undo the ioBroker state write above.
-    if (mariadbPool) {
-        try {
-            await upsertTariffSchedule(mariadbPool, year, Number(month), netzbezug, solarbezug);
-        } catch (e) {
-            adapter.log.warn(`setTariffForMonth(${year}-${month}) - MariaDB write failed: ${e.message}`);
-        }
-    }
-} // END setTariffForMonth
-
 async function ensureTariffDefaultObjects() {
     await ensureValueState(
         'Tarif.default.netzbezug',
@@ -1813,362 +1158,104 @@ async function ensureTariffDefaultObjects() {
 } // END ensureTariffDefaultObjects
 
 /**
- * Deletes leftover flat Tarif.<year>.<month> objects from the single-pauschal-tariff
- * schema that predates the Solarbezug/Netzbezug split. They hold no state value (dead
- * weight) and are superseded by the Tarif.<year>.<month>.netzbezug/solarbezug pair -
- * left in place they confuse the object tree (a "01" leaf sitting next to a "08" folder).
- */
-async function cleanupLegacyTariffObjects() {
-    try {
-        const objects = await adapter.getForeignObjectsAsync(`${adapter.namespace}.Tarif.*`, 'state');
-        for (const id of Object.keys(objects)) {
-            if (/\.Tarif\.\d{4}\.\d{2}$/.test(id)) {
-                await adapter.delObjectAsync(id.slice(adapter.namespace.length + 1));
-                adapter.log.info(`Removed legacy single-tariff object ${id} (superseded by .netzbezug/.solarbezug)`);
-            }
-        }
-    } catch (e) {
-        adapter.log.warn(`cleanupLegacyTariffObjects - Error: ${e.message}`);
-    }
-} // END cleanupLegacyTariffObjects
-
-async function ensureAllMonthlyTariffsUntil(untilYear) {
-    // Pre-create every month from the current one through December of untilYear, so
-    // the landlord can plan/fill in tariffs years ahead rather than only ever seeing
-    // the current month.
-    const now = new Date();
-    const startYear = now.getFullYear();
-    const startMonth = now.getMonth() + 1;
-
-    for (let year = startYear; year <= untilYear; year++) {
-        const fromMonth = year === startYear ? startMonth : 1;
-        for (let m = fromMonth; m <= 12; m++) {
-            await ensureMonthlyTariffState(year, String(m).padStart(2, '0'));
-        }
-    }
-} // END ensureAllMonthlyTariffsUntil
-
-async function getTariffsForMonth(year, month) {
-    // Per-month Netzbezug/Solarbezug tariffs. MariaDB (tariff_schedule) is now the
-    // PRIMARY source: the abr.bronnenhuber.ch web application writes tariffs there
-    // directly and has no access to ioBroker's object tree, so a tariff set via the web
-    // app must actually be read back from here to take effect. (Bug fixed 2026-08:
-    // this previously only worked ioBroker -> MariaDB via setTariffForMonth(), never the
-    // other way - a tariff changed in the web app silently had zero billing effect.)
-    // Falls back to the ioBroker Tarif.<year>.<month>.* states (then Tarif.default.*)
-    // when MariaDB is unavailable or no row exists yet for this month - keeps the
-    // adapter fully usable standalone, matching the original local-first design.
-    await ensureMonthlyTariffState(year, month);
-
-    if (mariadbPool) {
-        try {
-            const dbRow = await queryTariffForMonth(mariadbPool, Number(year), Number(month));
-            if (dbRow) {
-                const netzbezug = Number(dbRow.netzbezug_chf_kwh);
-                const solarbezug = Number(dbRow.solarbezug_chf_kwh);
-                // Mirror into the ioBroker object tree too, so the Admin UI/object view
-                // reflects what's actually being billed, not a stale value from before
-                // MariaDB (or the web app) last changed it.
-                await adapter.setStateAsync(`Tarif.${year}.${month}.netzbezug`, netzbezug, true);
-                await adapter.setStateAsync(`Tarif.${year}.${month}.solarbezug`, solarbezug, true);
-                return { netzbezug, solarbezug };
-            }
-        } catch (e) {
-            adapter.log.warn(
-                `getTariffsForMonth(${year}-${month}): MariaDB read failed, falling back to ioBroker states: ${e.message}`,
-            );
-        }
-    }
-
-    // No explicit tariff for this month in tariff_schedule (or the DB is unreachable): the
-    // value below is a built-in example/default, not a rate somebody entered. Say so every
-    // night instead of billing with it silently.
-    // Without MariaDB the tariff is not authoritative here (the billing web application
-    // takes the tariff from its own tariff table), so this is only a hint then.
-    const tariffMessage = `No tariff set in tariff_schedule for ${year}-${month} (or MariaDB unreachable) - billing with the default/example tariff. Set the real tariff in the web app (Tarife).`;
-    if (adapter.config.mariadbEnabled) {
-        adapter.log.warn(tariffMessage);
-    } else {
-        adapter.log.debug(tariffMessage);
-    }
-
-    async function resolve(kind, fallbackDefault) {
-        const monthState = await adapter.getStateAsync(`Tarif.${year}.${month}.${kind}`);
-        if (monthState && monthState.val !== null && monthState.val !== undefined && monthState.val !== '') {
-            return Number(monthState.val);
-        }
-        const defaultState = await adapter.getStateAsync(`Tarif.default.${kind}`);
-        if (defaultState && defaultState.val !== null && defaultState.val !== undefined && defaultState.val !== '') {
-            return Number(defaultState.val);
-        }
-        return fallbackDefault;
-    }
-
-    return {
-        netzbezug: await resolve('netzbezug', DEFAULT_TARIFF_NETZBEZUG),
-        solarbezug: await resolve('solarbezug', DEFAULT_TARIFF_SOLARBEZUG),
-    };
-} // END getTariffsForMonth
-
-/**
  * Regenerates the "current period so far" XLSX report from MariaDB (month-to-date) and
  * makes it available for manual download via Export.lastFile - runs both nightly (after
  * the day's MariaDB write) and on-demand (Export.triggerMeterReadings).
  */
 /**
- * @returns {Promise<string|null>} the adapter-relative file path of the generated report
- *   (e.g. "export/abrechnung_manuell_2026-08.xlsx"), or null if it could not be generated.
+ * Creates the states of the billing path: the idempotency guard of the nightly run and the daily journal that the
+ * adapter iobroker.abrechnungmailcarrier delivers to the billing web application over its HTTPS API.
+ * (Declared in io-package.json instanceObjects too, but js-controller does not reliably re-sync those into an
+ * already-running instance on a plain file update.)
  */
-async function regenerateCurrentReport() {
-    if (!mariadbPool) {
-        adapter.log.warn('Cannot generate report: MariaDB is not enabled/connected (see instance configuration).');
-        return null;
-    }
+async function ensureJournalObjects() {
+    await adapter.setObjectNotExistsAsync('Database', { type: 'channel', common: { name: 'Billing journal' }, native: {} });
+    await adapter.setObjectNotExistsAsync('Database.lastAccumulatedDate', {
+        type: 'state',
+        common: {
+            name: 'Last date the daily billing accumulation ran (YYYY-MM-DD)',
+            type: 'string',
+            role: 'value.datetime',
+            read: true,
+            write: false,
+            def: '',
+            desc: 'Idempotency guard: accumulateMonthlyPerDevice() refuses to run again for a date already recorded here, so the running Zählerstand can never be double-counted by an accidental second run on the same day.',
+        },
+        native: {},
+    });
+    await adapter.setObjectNotExistsAsync('Database.dailyJournal', {
+        type: 'state',
+        common: {
+            name: 'Daily billing journal (JSON, last 120 days)',
+            type: 'string',
+            role: 'json',
+            read: true,
+            write: false,
+            def: '',
+            desc: 'The finished nightly billing rows (meter_daily/building_daily) of the last 120 days. Read by the adapter iobroker.abrechnungmailcarrier, which delivers them over the HTTPS API to the billing web application. Do not edit.',
+        },
+        native: {},
+    });
+} // END ensureJournalObjects
+
+/**
+ * Deletes the objects of the removed MariaDB integration (database check, offline buffer, XLSX report export,
+ * per-month tariff states). They hold nothing the billing needs any more and would only confuse the object tree.
+ */
+async function removeObsoleteObjects() {
+    const ids = [
+        'Database.testConnection',
+        'Database.connected',
+        'Database.lastCheckMessage',
+        'Database.lastCheck',
+        'Database.pendingDays',
+        'Database.pendingRows',
+        'Export.triggerMeterReadings',
+        'Export.lastFile',
+        'Export.reportState',
+    ];
     try {
-        const now = new Date();
-        const y = now.getFullYear();
-        const m = String(now.getMonth() + 1).padStart(2, '0');
-        const fromDate = `${y}-${m}-01`;
-        const toDate = `${y}-${m}-${String(now.getDate()).padStart(2, '0')}`;
-
-        const meterRows = await queryMeterPeriod(mariadbPool, fromDate, toDate);
-        const buildingRows = await queryBuildingPeriod(mariadbPool, fromDate, toDate);
-        const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, fromDate, toDate);
-        const tariffRows = await queryTariffsPeriod(mariadbPool, fromDate, toDate);
-        const buffer = await buildReportWorkbook(
-            meterRows,
-            buildingRows,
-            { title: `Abrechnung ${fromDate} bis ${toDate} (laufender Monat)` },
-            umlagekostenRows,
-            tariffRows,
-        );
-
-        const fileName = `export/${buildReportFileName('manuell', `${y}-${m}`)}`;
-        await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
-        await adapter.setStateAsync('Export.lastFile', fileName, true);
-        adapter.log.info(`Regenerated current-period report: ${fileName} (${meterRows.length} meter rows)`);
-        return fileName;
-    } catch (e) {
-        adapter.log.warn(`regenerateCurrentReport - Error: ${e.message}`);
-        return null;
-    }
-} // END regenerateCurrentReport
-
-/**
- * Which ioBroker.email instance to send through - configurable (Billing tab), since a
- * host can run several email instances or name theirs differently. Defaults to the
- * conventional "email.0" if left blank.
- */
-function getEmailInstance() {
-    return (adapter.config.emailInstance || 'email.0').trim();
-} // END getEmailInstance
-
-/**
- * Checks that the configured email instance actually exists and is running, before we
- * attempt to sendTo() it. Without this, a typo'd/removed instance name (e.g. "email.5"
- * when only "email.0" exists) makes sendTo() silently do nothing - no error, no email,
- * no indication anything went wrong - both for the manual "Send test e-mail" button and
- * for the unattended scheduled report job.
- *
- * @param {string} instance e.g. "email.0"
- * @returns {Promise<{ok: boolean, message: string}>}
- */
-async function checkEmailInstance(instance) {
-    const instanceObj = await adapter.getForeignObjectAsync(`system.adapter.${instance}`);
-    if (!instanceObj) {
-        return { ok: false, message: `Instance "${instance}" does not exist.` };
-    }
-    const aliveState = await adapter.getForeignStateAsync(`system.adapter.${instance}.alive`);
-    if (!aliveState || !aliveState.val) {
-        return { ok: false, message: `Instance "${instance}" exists but is not running.` };
-    }
-    return { ok: true, message: '' };
-} // END checkEmailInstance
-
-/**
- * Builds and sends the scheduled monthly/quarterly/yearly report by email, per
- * lib/scheduling.js's decision. The file is written to the adapter's own file storage
- * FIRST, before attempting to send - so a working copy exists under export/sent/ even
- * if the email delivery itself fails (the whole point of this requirement).
- *
- * @param {{fromDate: string, toDate: string, label: string}} period
- * @returns {Promise<boolean>} true = done (sent, or saved without recipient, or a config
- *   error that retrying cannot fix); false = try again later (MariaDB or e-mail instance
- *   not available, unexpected error) - see checkAndSendScheduledReport()
- */
-async function sendScheduledReport(period) {
-    if (!mariadbPool) {
-        await ensureMariaDbPool();
-    }
-    if (!mariadbPool) {
-        adapter.log.warn(`Scheduled report for ${period.label} is due but MariaDB is not connected - will retry.`);
-        return false;
-    }
-    try {
-        const meterRows = await queryMeterPeriod(mariadbPool, period.fromDate, period.toDate);
-        const buildingRows = await queryBuildingPeriod(mariadbPool, period.fromDate, period.toDate);
-        const umlagekostenRows = await queryMeterUmlagekostenPeriod(mariadbPool, period.fromDate, period.toDate);
-        const tariffRows = await queryTariffsPeriod(mariadbPool, period.fromDate, period.toDate);
-        const buffer = await buildReportWorkbook(
-            meterRows,
-            buildingRows,
-            { title: `Abrechnung ${period.label}` },
-            umlagekostenRows,
-            tariffRows,
-        );
-
-        const year = period.fromDate.slice(0, 4);
-        const fileName = `export/sent/${year}/${buildReportFileName(adapter.config.reportSchedule, period.label)}`;
-        await adapter.writeFileAsync(adapter.namespace, fileName, buffer);
-        adapter.log.info(`Scheduled report for ${period.label} saved: ${fileName}`);
-
-        if (adapter.config.reportRecipient) {
-            if (!isValidEmailList(adapter.config.reportRecipient)) {
-                adapter.log.error(
-                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: recipient address(es) invalid: "${adapter.config.reportRecipient}"`,
-                );
-                return true; // a configuration error - retrying cannot fix it
+        for (const id of ids) {
+            if (await adapter.getObjectAsync(id)) {
+                await adapter.delObjectAsync(id);
+                adapter.log.info(`Removed obsolete object ${id} (MariaDB integration was removed)`);
             }
-            if (!isValidEmailList(adapter.config.reportCc, true)) {
-                adapter.log.error(
-                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: Cc address(es) invalid: "${adapter.config.reportCc}"`,
-                );
-                return true; // a configuration error - retrying cannot fix it
-            }
-            const instanceCheck = await checkEmailInstance(getEmailInstance());
-            if (!instanceCheck.ok) {
-                adapter.log.error(
-                    `Scheduled report for ${period.label} was saved to ${fileName}, but could not be e-mailed: ${instanceCheck.message} - will retry.`,
-                );
-                return false;
-            }
-            const emailContent = buildReportEmailContent(
-                period,
-                adapter.config.reportEmailSubject,
-                adapter.config.reportEmailBody,
-            );
-            // A report for a period with missing days understates consumption and CHF. It
-            // is still sent (a missing report is worse), but it says so loudly, in the
-            // subject and at the top of the text, and the log carries an error.
-            const coverage = periodCoverage(meterRows, period.fromDate, period.toDate);
-            const warning = coverageWarningText(coverage);
-            if (warning) {
-                adapter.log.error(
-                    `Scheduled report for ${period.label} is INCOMPLETE: ${coverage.missingDays.length} of ${coverage.expectedDays} day(s) have no billing data (${coverage.missingDays.join(', ')}). Recover with tools/backfill-from-influx.js, then re-send from the web app.`,
-                );
-                emailContent.subject = `[UNVOLLSTAENDIG] ${emailContent.subject}`;
-                emailContent.text = `${warning}\n\n${emailContent.text}`;
-            }
-            const to = parseEmailList(adapter.config.reportRecipient).join(', ');
-            const cc = parseEmailList(adapter.config.reportCc).join(', ');
-            await adapter.sendToAsync(getEmailInstance(), 'send', {
-                to,
-                ...(cc ? { cc } : {}),
-                subject: emailContent.subject,
-                text: emailContent.text,
-                attachments: [
-                    {
-                        filename: fileName.split('/').pop(),
-                        content: buffer.toString('base64'),
-                        encoding: 'base64',
-                    },
-                ],
-            });
-            adapter.log.info(
-                `Scheduled report for ${period.label} sent to ${to}${cc ? ` (Cc: ${cc})` : ''} via ${getEmailInstance()}.`,
-            );
-        } else {
-            adapter.log.warn(`Scheduled report for ${period.label} saved but not sent: no recipient configured.`);
         }
-        return true;
-    } catch (e) {
-        // File (if it got written before the failure) stays in export/sent/ as the fallback.
-        adapter.log.error(`sendScheduledReport(${period.label}) - Error: ${e.message} - will retry.`);
-        return false;
-    }
-} // END sendScheduledReport
-
-/**
- * Deletes files under export/sent/ older than 365 days - the "1 year archival, then
- * cleaned up" requirement for sent-report fallback copies.
- */
-async function cleanupSentReports() {
-    try {
-        const files = await adapter.readDirAsync(adapter.namespace, 'export/sent');
-        const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
-        for (const f of files) {
-            if (!f.isDir && f.modifiedAt && f.modifiedAt < cutoff) {
-                await adapter.unlinkAsync(adapter.namespace, `export/sent/${f.file}`);
-                adapter.log.info(`Removed sent-report older than 1 year: ${f.file}`);
+        if (await adapter.getObjectAsync('Export')) {
+            await adapter.delObjectAsync('Export', { recursive: true });
+        }
+        const tariffs = await adapter.getObjectListAsync({
+            startkey: `${adapter.namespace}.Tarif.`,
+            endkey: `${adapter.namespace}.Tarif.\u9999`,
+        });
+        for (const row of tariffs.rows) {
+            const local = row.id.slice(adapter.namespace.length + 1);
+            if (/^Tarif\.\d{4}(\.|$)/.test(local)) {
+                await adapter.delObjectAsync(local);
             }
         }
     } catch (e) {
-        // readDirAsync throws if the folder doesn't exist yet (nothing sent so far) - not an error.
-        adapter.log.debug(`cleanupSentReports: ${e.message}`);
+        adapter.log.warn(`removeObsoleteObjects - Error: ${e.message}`);
     }
-} // END cleanupSentReports
+} // END removeObsoleteObjects
 
 /**
- * Runs every hour (at :10). Decides (via lib/scheduling.js) whether a scheduled report is
- * due today and registers it as pending; then tries to send the pending report. A report
- * that could not be sent (MariaDB or mail server down, adapter restarting at 00:10) stays
- * pending and is retried every hour for up to 7 days - it used to be tried exactly once.
- * The state (last sent report, pending report) lives in Export.reportState so a restart
- * neither loses a pending report nor sends a finished one again. Also prunes sent-report
- * copies older than 1 year.
+ * Tariff written into the rows of the journal: the standing values Tarif.default.* (the billing web application
+ * recomputes the amounts with its own tariff table when the rows arrive, so this only fills the row columns).
  */
-async function checkAndSendScheduledReport() {
-    try {
-        await cleanupSentReports();
-        if (!adapter.config.reportEnabled) {
-            return;
+async function getTariffsForMonth() {
+    async function resolve(kind, fallbackDefault) {
+        const state = await adapter.getStateAsync(`Tarif.default.${kind}`);
+        if (state && state.val !== null && state.val !== undefined && state.val !== '') {
+            return Number(state.val);
         }
-        const todayStr = localDateStr(new Date());
-        const stateObj = await adapter.getStateAsync('Export.reportState');
-        let state = parseReportState(stateObj && typeof stateObj.val === 'string' ? stateObj.val : null);
-
-        const due = determineScheduledPeriod(
-            new Date(),
-            adapter.config.reportSchedule,
-            Number(adapter.config.reportCutoffDay) || 1,
-        );
-        if (!stateObj || stateObj.val === null || stateObj.val === undefined) {
-            // First run of a version that keeps this state: the report due today (if any) was
-            // already handled by the old once-a-day job at 00:10 - do not send it a second time.
-            state = due ? { lastKey: reportKeyOf(adapter.config.reportSchedule, due), pending: null } : state;
-            await adapter.setStateAsync('Export.reportState', JSON.stringify(state), true);
-            adapter.log.info(`Report state initialised${due ? ` (report ${due.label} counts as already sent)` : ''}.`);
-            return;
-        }
-        if (due) {
-            adapter.log.info(`Scheduled report due today: ${due.label} (${due.fromDate} - ${due.toDate})`);
-        }
-        const registered = registerDueReport(state, due, adapter.config.reportSchedule, todayStr);
-        state = registered.state;
-        if (registered.replaced) {
-            adapter.log.error(
-                `Scheduled report ${registered.replaced.key} could not be sent for days and is replaced by the next one - send it from the web app.`,
-            );
-        }
-        const expired = expirePendingReport(state, todayStr);
-        state = expired.state;
-        if (expired.expired) {
-            adapter.log.error(
-                `Scheduled report ${expired.expired.key} could not be sent within ${MAX_PENDING_REPORT_DAYS} days and is given up - send it from the web app.`,
-            );
-        }
-
-        if (state.pending) {
-            const done = await sendScheduledReport(state.pending.period);
-            if (done) {
-                state = markReportSent(state);
-            }
-        }
-        await adapter.setStateAsync('Export.reportState', JSON.stringify(state), true);
-    } catch (e) {
-        adapter.log.warn(`checkAndSendScheduledReport - Error: ${e.message}`);
+        return fallbackDefault;
     }
-} // END checkAndSendScheduledReport
+    return {
+        netzbezug: await resolve('netzbezug', DEFAULT_TARIFF_NETZBEZUG),
+        solarbezug: await resolve('solarbezug', DEFAULT_TARIFF_SOLARBEZUG),
+    };
+} // END getTariffsForMonth
 
 async function test() {
     try {
