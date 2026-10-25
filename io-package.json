@@ -3,6 +3,10 @@
     "name": "solarlog",
     "version": "2.5.24",
     "news": {
+      "2.5.24": {
+        "en": "New: the finished nightly rows are also kept in the local journal Database.dailyJournal (last 120 days), independent of MariaDB. The adapter iobroker.abrechnungmailcarrier delivers them over the HTTPS API to the billing web application, so the database connection (SSH tunnel) is no longer needed. The missed-night check also works without MariaDB.",
+        "de": "Neu: Die fertigen Nachtzeilen werden zusätzlich im lokalen Journal Database.dailyJournal (letzte 120 Tage) gehalten, unabhängig von MariaDB. Der Adapter iobroker.abrechnungmailcarrier liefert sie per HTTPS-API an die Abrechnungs-Webanwendung, die Datenbankverbindung (SSH-Tunnel) ist dafür nicht mehr nötig. Die Prüfung auf verpasste Nächte funktioniert auch ohne MariaDB."
+      },
       "2.5.23": {
         "en": "New: the nightly run flags rows built from stale device values (Solar-Log not reachable for more than 30 minutes at 23:58) as datenqualitaet=veraltet (new column, existing rows stay ok) and logs an error; reports mark such days. A billable meter without a daysum value is logged as an error. The scheduled report is now retried every hour for up to 7 days when MariaDB or the mail server is not available (state Export.reportState); previously it was tried once at 00:10.",
         "de": "Neu: Der Nachtlauf kennzeichnet Zeilen, die aus veralteten Gerätewerten gebaut wurden (Solar-Log um 23:58 länger als 30 Minuten nicht erreichbar), als datenqualitaet=veraltet (neue Spalte, bestehende Zeilen bleiben ok) und loggt einen Fehler; Berichte markieren solche Tage. Ein abrechenbarer Zähler ohne daysum-Wert wird als Fehler geloggt. Der geplante Bericht wird jetzt stündlich bis zu 7 Tage lang wiederholt, wenn MariaDB oder der Mailserver nicht verfügbar sind (State Export.reportState); vorher gab es nur einen Versuch um 00:10.",
