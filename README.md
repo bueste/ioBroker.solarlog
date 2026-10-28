@@ -36,7 +36,9 @@ Forecast: optionally, the adapter gets forecast - data using the Forecast.Solar 
 For properties with per-apartment sub-meters (e.g. a ZEV/tenant-billing setup) the adapter splits the daily
 consumption of every meter into own solar power and grid power (method `integriert` from the fast poll, fallback
 `tagesnetto`). Every night at 23:58 the finished rows are stored in the state `Database.dailyJournal` (last 120
-days). The adapter [iobroker.abrechnungmailcarrier](https://github.com/bueste/ioBroker.AbrechnungMailcarrier)
+days). Since 3.1.0 the journal also receives the state of the current day so far every 15 minutes (minutes
+7, 22, 37, 52, marked `datenqualitaet = vorlaeufig`); the nightly run replaces it with the final entry, and if that
+run never happens the snapshot stays as the best known state of the day. The adapter [iobroker.abrechnungmailcarrier](https://github.com/bueste/ioBroker.AbrechnungMailcarrier)
 delivers them over an authenticated HTTPS API to the billing web application. Since 3.0.0 there is no database
 connection, no SSH tunnel and no report export in this adapter any more. A night that is missing can be rebuilt
 from InfluxDB with `tools/backfill-from-influx.js`. See [docs/BILLING.md](docs/BILLING.md) for the methodology

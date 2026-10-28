@@ -97,6 +97,7 @@ let fastPolling;
 let jedeStunde;
 let jedenTag;
 let jedeNacht;
+let snapshotJob;
 let missedNightJob;
 let restartTimer;
 
@@ -126,6 +127,8 @@ function unload(callback) {
         jedeNacht && jedeNacht.cancel();
         jedeNacht = null;
 
+        snapshotJob && snapshotJob.cancel();
+        snapshotJob = null;
 
         missedNightJob && missedNightJob.cancel();
         missedNightJob = null;
@@ -344,6 +347,9 @@ async function main() {
 
         if (uzimp) {
             jedeNacht = schedule.scheduleJob('58 23 * * *', async () => accumulateMonthlyPerDevice());
+            // Intraday snapshot every 15 minutes (not at 23:58 and not right at midnight, when the device
+            // counters are being reset): the journal then holds "today so far" in case the night run fails.
+            snapshotJob = schedule.scheduleJob('7,22,37,52 * * * *', async () => writeProvisionalDay());
         }
 
 
@@ -640,6 +646,144 @@ async function accumulateIntradayDelta(yieldDayWh, consYieldDayWh) {
     ]);
 } // END accumulateIntradayDelta
 
+/**
+ * What today's rows are built from: the day totals of the Solar-Log, the self-consumption ratio and the method.
+ * Read-only, shared by the nightly run and the intraday snapshot (writeProvisionalDay()).
+ *
+ * Hybrid Tagesnetto/integriert: prefer the true intraday-integrated self-consumption ratio (built from
+ * accumulateIntradayDelta()'s running totals), but only if fastpoll coverage today was good enough to trust it -
+ * falls back to the coarser same-day-net approximation otherwise (VPN/ioBroker downtime, adapter restart mid-day,
+ * etc.). See accumulateIntradayDelta() for how the running totals are built and why they're robust to individual
+ * poll gaps.
+ *
+ * @param {Date} now
+ */
+async function computeDayBasis(now) {
+    const prodState = await adapter.getStateAsync('status.yieldday');
+    const consState = await adapter.getStateAsync('status.consyieldday');
+    const yieldWh = prodState && prodState.val !== null ? Number(prodState.val) : 0;
+    const consWh = consState && consState.val !== null ? Number(consState.val) : 0;
+
+    const INTRADAY_COVERAGE_THRESHOLD = 0.95;
+    const selfConsumedState = await adapter.getStateAsync('status.intradaySelfConsumedWh');
+    const gridDrawState = await adapter.getStateAsync('status.intradayGridDrawWh');
+    const feedinState = await adapter.getStateAsync('status.intradayFeedinWh');
+    const coveredState = await adapter.getStateAsync('status.intradayCoveredSeconds');
+    const selfConsumedWh = selfConsumedState && selfConsumedState.val ? Number(selfConsumedState.val) : 0;
+    const gridDrawWh = gridDrawState && gridDrawState.val ? Number(gridDrawState.val) : 0;
+    const feedinIntegratedWh = feedinState && feedinState.val ? Number(feedinState.val) : 0;
+    const coveredSeconds = coveredState && coveredState.val ? Number(coveredState.val) : 0;
+    const secondsSinceMidnight = (now - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 1000;
+    const coverageRatio = secondsSinceMidnight > 0 ? coveredSeconds / secondsSinceMidnight : 0;
+
+    let ratio;
+    let einspeisungWh;
+    let berechnungsmethode;
+    if (coverageRatio >= INTRADAY_COVERAGE_THRESHOLD && selfConsumedWh + gridDrawWh > 0) {
+        ratio = selfConsumedWh / (selfConsumedWh + gridDrawWh);
+        einspeisungWh = feedinIntegratedWh;
+        berechnungsmethode = 'integriert';
+    } else {
+        ratio = selfConsumptionRatio(yieldWh, consWh);
+        einspeisungWh = Math.max(0, yieldWh - consWh);
+        berechnungsmethode = 'tagesnetto';
+    }
+    adapter.log.debug(
+        `computeDayBasis: Fastpoll-Abdeckung heute ${(coverageRatio * 100).toFixed(1)}% -> Methode "${berechnungsmethode}"`,
+    );
+
+    const lastPollState = await adapter.getStateAsync('status.intradayLastPollTs');
+    return {
+        yieldWh,
+        consWh,
+        ratio,
+        einspeisungWh,
+        berechnungsmethode,
+        lastPollTs: lastPollState && lastPollState.val,
+    };
+} // END computeDayBasis
+
+/** Lifetime meter reading (Wh) of one meter before today's daysum is added to it. */
+async function readZaehlerstand(name) {
+    const totalState = await adapter.getStateAsync(`INV.${name}.yieldtotal`);
+    if (totalState && totalState.val !== null && totalState.val !== undefined) {
+        return Number(totalState.val);
+    }
+    // First time this counter is created: seed it with whatever month-to-date
+    // consumption is already tracked in yieldmonth, so it starts "caught up"
+    // instead of at 0 (which would make Zählerstand-Anfang come out negative
+    // for the very first month after this feature was introduced).
+    const monthSoFar = await adapter.getStateAsync(`INV.${name}.yieldmonth`);
+    return monthSoFar && monthSoFar.val ? Number(monthSoFar.val) : 0;
+} // END readZaehlerstand
+
+/**
+ * Intraday snapshot: writes the figures of "today so far" into the journal every 15 minutes, marked
+ * "vorlaeufig", so the billing web application holds a recent state of the day even if the VM, the adapter or
+ * the Solar-Log fails before the nightly run. The 23:58 run replaces the entry with the final one.
+ * Changes no counters or monthly states; only the journal entry is written.
+ */
+async function writeProvisionalDay() {
+    try {
+        const now = new Date();
+        const todayStr = localDateStr(now);
+
+        const lastRunState = await adapter.getStateAsync('Database.lastAccumulatedDate');
+        if (lastRunState && lastRunState.val === todayStr) {
+            return; // the day is already closed, a snapshot must never replace the final entry
+        }
+        const lastDateState = await adapter.getStateAsync('status.intradayLastDate');
+        if (!lastDateState || lastDateState.val !== todayStr) {
+            return; // no poll yet today: the device counters still show yesterday
+        }
+
+        const { yieldWh, consWh, ratio, einspeisungWh, berechnungsmethode } = await computeDayBasis(now);
+        const dailyTariffs = await getTariffsForMonth();
+        const meterDailyRows = [];
+        for (const name of names) {
+            if (!isBillableMeter(name)) {
+                continue;
+            }
+            const dayState = await adapter.getStateAsync(`INV.${name}.daysum`);
+            if (!dayState || dayState.val === null || dayState.val === undefined) {
+                continue;
+            }
+            const daysum = Number(dayState.val) || 0;
+            const solarWh = daysum * ratio;
+            const zaehlerstandVorher = await readZaehlerstand(name);
+            if (dailyTariffs) {
+                meterDailyRows.push(
+                    buildMeterDailyRow({
+                        date: todayStr,
+                        meterName: name,
+                        zStartKwh: zaehlerstandVorher / 1000,
+                        zEndeKwh: (zaehlerstandVorher + daysum) / 1000,
+                        verbrauchKwh: daysum / 1000,
+                        solarKwh: solarWh / 1000,
+                        netzKwh: (daysum - solarWh) / 1000,
+                        tarifNetz: dailyTariffs.netzbezug,
+                        tarifSolar: dailyTariffs.solarbezug,
+                        berechnungsmethode,
+                        datenqualitaet: 'vorlaeufig',
+                    }),
+                );
+            }
+        }
+        const buildingRow = buildBuildingDailyRow({
+            date: todayStr,
+            produktionKwh: yieldWh / 1000,
+            verbrauchKwh: consWh / 1000,
+            einspeisungKwh: einspeisungWh / 1000,
+            selbstverbrauchtKwh: (consWh * ratio) / 1000,
+            berechnungsmethode,
+            datenqualitaet: 'vorlaeufig',
+        });
+        await writeJournalDay(todayStr, 'vorlaeufig', meterDailyRows, buildingRow, true);
+    } catch (e) {
+        adapter.log.warn(`writeProvisionalDay - Error: ${e.message}`);
+    }
+} // END writeProvisionalDay
+
 async function accumulateMonthlyPerDevice() {
     // Solar-Log only reports per-device totals per YEAR (code 854), not per month.
     // We accumulate several things per device ourselves from the daily 'daysum' values:
@@ -674,51 +818,13 @@ async function accumulateMonthlyPerDevice() {
             return;
         }
 
-        const prodState = await adapter.getStateAsync('status.yieldday');
-        const consState = await adapter.getStateAsync('status.consyieldday');
-        const yieldWh = prodState && prodState.val !== null ? Number(prodState.val) : 0;
-        const consWh = consState && consState.val !== null ? Number(consState.val) : 0;
-
-        // Hybrid Tagesnetto/integriert: prefer the true intraday-integrated self-
-        // consumption ratio (built from accumulateIntradayDelta()'s running totals),
-        // but only if fastpoll coverage today was good enough to trust it - falls back
-        // to the coarser same-day-net approximation otherwise (VPN/ioBroker downtime,
-        // adapter restart mid-day, etc.). See accumulateIntradayDelta() for how the
-        // running totals are built and why they're robust to individual poll gaps.
-        const INTRADAY_COVERAGE_THRESHOLD = 0.95;
-        const selfConsumedState = await adapter.getStateAsync('status.intradaySelfConsumedWh');
-        const gridDrawState = await adapter.getStateAsync('status.intradayGridDrawWh');
-        const feedinState = await adapter.getStateAsync('status.intradayFeedinWh');
-        const coveredState = await adapter.getStateAsync('status.intradayCoveredSeconds');
-        const selfConsumedWh = selfConsumedState && selfConsumedState.val ? Number(selfConsumedState.val) : 0;
-        const gridDrawWh = gridDrawState && gridDrawState.val ? Number(gridDrawState.val) : 0;
-        const feedinIntegratedWh = feedinState && feedinState.val ? Number(feedinState.val) : 0;
-        const coveredSeconds = coveredState && coveredState.val ? Number(coveredState.val) : 0;
-        const secondsSinceMidnight = (now - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 1000;
-        const coverageRatio = secondsSinceMidnight > 0 ? coveredSeconds / secondsSinceMidnight : 0;
-
-        let ratio;
-        let einspeisungWh;
-        let berechnungsmethode;
-        if (coverageRatio >= INTRADAY_COVERAGE_THRESHOLD && selfConsumedWh + gridDrawWh > 0) {
-            ratio = selfConsumedWh / (selfConsumedWh + gridDrawWh);
-            einspeisungWh = feedinIntegratedWh;
-            berechnungsmethode = 'integriert';
-        } else {
-            ratio = selfConsumptionRatio(yieldWh, consWh);
-            einspeisungWh = Math.max(0, yieldWh - consWh);
-            berechnungsmethode = 'tagesnetto';
-        }
-        adapter.log.debug(
-            `accumulateMonthlyPerDevice: Fastpoll-Abdeckung heute ${(coverageRatio * 100).toFixed(1)}% -> Methode "${berechnungsmethode}"`,
-        );
+        const { yieldWh, consWh, ratio, einspeisungWh, berechnungsmethode, lastPollTs } = await computeDayBasis(now);
 
         // Freshness of the device values the whole day is built from (see deviceDataQuality()).
-        const lastPollState = await adapter.getStateAsync('status.intradayLastPollTs');
-        const datenqualitaet = deviceDataQuality(lastPollState && lastPollState.val, Date.now());
+        const datenqualitaet = deviceDataQuality(lastPollTs, Date.now());
         if (datenqualitaet === 'veraltet') {
             adapter.log.error(
-                `Nightly billing run ${todayStr}: the Solar-Log has not answered for more than 30 minutes (last poll ${lastPollState && lastPollState.val ? new Date(Number(lastPollState.val)).toISOString() : 'never'}) - today's values are stale and the rows are flagged "veraltet". Check the day against the InfluxDB history.`,
+                `Nightly billing run ${todayStr}: the Solar-Log has not answered for more than 30 minutes (last poll ${lastPollTs ? new Date(Number(lastPollTs)).toISOString() : 'never'}) - today's values are stale and the rows are flagged "veraltet". Check the day against the InfluxDB history.`,
             );
         }
 
@@ -746,18 +852,7 @@ async function accumulateMonthlyPerDevice() {
             const solarWh = billable ? daysum * ratio : 0;
             const netzWh = billable ? daysum - solarWh : 0;
 
-            const totalState = await adapter.getStateAsync(totalId);
-            let zaehlerstandVorher;
-            if (totalState && totalState.val !== null && totalState.val !== undefined) {
-                zaehlerstandVorher = Number(totalState.val);
-            } else {
-                // First time this counter is created: seed it with whatever month-to-date
-                // consumption is already tracked in yieldmonth, so it starts "caught up"
-                // instead of at 0 (which would make Zählerstand-Anfang come out negative
-                // for the very first month after this feature was introduced).
-                const monthSoFar = await adapter.getStateAsync(monthId);
-                zaehlerstandVorher = monthSoFar && monthSoFar.val ? Number(monthSoFar.val) : 0;
-            }
+            const zaehlerstandVorher = await readZaehlerstand(name);
             const zaehlerstandNachher = zaehlerstandVorher + daysum;
             await adapter.setStateAsync(totalId, zaehlerstandNachher, true);
 
@@ -923,13 +1018,20 @@ function localDateStr(d) {
  * The read-change-write cycle is serialized, so the nightly run and a backfill cannot overwrite each other.
  */
 let journalTail = Promise.resolve();
-function writeJournalDay(date, datenqualitaet, meterRows, buildingRow) {
+function writeJournalDay(date, datenqualitaet, meterRows, buildingRow, quiet = false) {
     const run = journalTail.then(async () => {
         const state = await adapter.getStateAsync('Database.dailyJournal');
         const journal = parseJournal(state && typeof state.val === 'string' ? state.val : null);
+        // a provisional snapshot never replaces a day that is already final
+        const existing = journal.find(e => e.date === date);
+        if (datenqualitaet === 'vorlaeufig' && existing && existing.datenqualitaet !== 'vorlaeufig') {
+            return;
+        }
         const updated = upsertDay(journal, { date, datenqualitaet, meterRows, buildingRow });
         await adapter.setStateAsync('Database.dailyJournal', serializeJournal(updated), true);
-        adapter.log.info(`Journal: ${date} stored (${meterRows.length} meter rows), the journal holds ${updated.length} day(s)`);
+        adapter.log[quiet ? 'debug' : 'info'](
+            `Journal: ${date} stored (${meterRows.length} meter rows, ${datenqualitaet}), the journal holds ${updated.length} day(s)`,
+        );
     });
     journalTail = run.then(
         () => undefined,

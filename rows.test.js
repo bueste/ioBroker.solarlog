@@ -206,6 +206,11 @@ describe('datenqualitaet', () => {
         expect(buildBuildingDailyRow(building({ datenqualitaet: 'veraltet' })).datenqualitaet).to.equal('veraltet');
     });
 
+    it('carries vorlaeufig (intraday snapshot) through', () => {
+        expect(buildMeterDailyRow(meter({ datenqualitaet: 'vorlaeufig' })).datenqualitaet).to.equal('vorlaeufig');
+        expect(buildBuildingDailyRow(building({ datenqualitaet: 'vorlaeufig' })).datenqualitaet).to.equal('vorlaeufig');
+    });
+
     it('rejects an unknown value instead of storing garbage', () => {
         expect(() => buildMeterDailyRow(meter({ datenqualitaet: 'kaputt' }))).to.throw(/datenqualitaet/);
         expect(() => buildBuildingDailyRow(building({ datenqualitaet: 'kaputt' }))).to.throw(/datenqualitaet/);

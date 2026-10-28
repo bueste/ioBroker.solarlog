@@ -626,6 +626,13 @@ the outage and the day is understated. The row is still written, an error is log
 such days and the web app shows a banner. Rows from before 2.5.23 and backfilled rows are `ok`.
 A billable meter without a `daysum` value is logged as an error.
 
+Since 3.1.0 there is a third value, `vorlaeufig`: every 15 minutes (minutes 7, 22, 37, 52) the adapter
+writes the state of the current day so far into the journal (`writeProvisionalDay()` in `main.js`), built
+the same way as the nightly rows but without touching any counter or monthly state. The 23:58 run replaces
+the entry with the final one; a snapshot never replaces a final entry. If the night run never happens
+(VM, adapter or Solar-Log down), the snapshot remains as the last known state of the day and is shown as
+provisional in the web app.
+
 **Incomplete periods.** `periodCoverage()` (adapter) and `ReportMail::coverageWarning()` (web
 app) list days for which at least one billable meter has no row, plus the `veraltet` days. The
 report is still sent but carries `[UNVOLLSTAENDIG]` in the subject and a warning at the top of

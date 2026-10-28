@@ -42,6 +42,14 @@ describe('journal', () => {
         expect(upsertDay([], entry('2026-10-01', { datenqualitaet: 'x' }))[0].datenqualitaet).to.equal('ok');
     });
 
+    it('keeps the quality vorlaeufig of an intraday snapshot and lets the final entry replace it', () => {
+        let j = upsertDay([], entry('2026-10-01', { datenqualitaet: 'vorlaeufig' }));
+        expect(j[0].datenqualitaet).to.equal('vorlaeufig');
+        j = upsertDay(j, entry('2026-10-01'));
+        expect(j).to.have.length(1);
+        expect(j[0].datenqualitaet).to.equal('ok');
+    });
+
     it('stores a missing building row as null', () => {
         expect(upsertDay([], { date: '2026-10-01', meterRows: [row('2026-10-01')] })[0].buildingRow).to.equal(null);
     });
